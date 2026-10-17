@@ -1,53 +1,50 @@
-# spooki-love
+# Notan
 
-Documentation: https://spookidev.com/spooki-love/docs (source in `docs/`).
+A desktop image tool for painters. Open a photo and stack GPU effects over it — blur, levels, saturation, posterise — so its values read as flat shapes before you paint them. *Notan* (濃淡) is the Japanese principle of designing a picture through its masses of light and dark, which is what the effect chain leaves behind. Built on the [spooki-love](https://github.com/spooki-dev/spooki-love) LÖVE (Love2D) 11.5 engine template.
 
-An empty LÖVE (Love2D) 11.5 game built on a small, self-contained engine (`engine/`). Scaffold a copy with `init.sh`, then start adding scenes.
-
-## Scaffold a new game
-
-```sh
-# from a checkout of this repo:
-./init.sh ../my-game
-
-# without a checkout:
-curl -fsSL https://raw.githubusercontent.com/spooki-dev/spooki-love/main/init.sh | bash -s my-game
-
-# or clone first and rename in place:
-git clone https://github.com/spooki-dev/spooki-love.git my-game && cd my-game && ./init.sh
-```
-
-The wizard asks for the game title, author and itch.io username (Enter keeps the default shown in brackets) and derives the slug, package name and bundle id. It rewrites the window title, the Menu and marketing wordmarks, the variables at the top of `scripts/release.sh`, and writes a fresh `README.md` and `CHANGELOG.md`. Pass `--title`, `--author`, `--itch`, `--uti` and `--yes` to skip the prompts. It leaves `git init` and `love . --export-assets` to you and prints them as next steps.
-
-## Quick start
+## Run
 
 ```sh
 # love is not on PATH on macOS:
 /Applications/love.app/Contents/MacOS/love .
+/Applications/love.app/Contents/MacOS/love . ~/pictures/study.jpg   # open straight onto an image
 ```
 
-You get a Menu scene with a Start button that switches to an empty `Game` scene, custom cursors, hot reload on save (backtick to force), and a dev MCP bridge on port 12345.
+Drag an image onto the window, or press `O`. Then:
 
-## Make it yours
+| Key | |
+|---|---|
+| `O` | open an image |
+| `E` | export the processed image as a PNG next to the source |
+| `TAB` | hold to see the original |
+| `0` / `1` | fit to window / 100% |
+| `G` | toggle the composition grid |
+| `R` | reset the effects |
+| `H` | hide the panel |
+| `C` | key bindings |
 
-1. If you did not use `init.sh`: set the window title and `t.identity` (save directory name) in `conf.lua`, `title` in `main.lua` and the wordmarks in `scenes/Menu.lua` and `scenes/assets/*.lua`.
-2. Add scenes under `scenes/`, require them in `main.lua` and append them to the `scenes` array. Keep `Preload` first. See `docs/scenes.md`.
-3. Preload fonts and spritesheets in `scenes/Preload.lua`. The UI primitives expect font keys `header`, `subheader`, `body`, `small`.
-4. Put entities in `gameObjects/`, data in `constants/`, and shared state in `state/GameState.lua`.
-5. Edit the `lines`/`subtitle` in `scenes/assets/*.lua`; `love . --export-assets` regenerates the icon, favicon, cover, social, wide and logo images in `assets/generated/`.
-6. Declare input actions in the `input` block of `main.lua` and read them with `inputMap`; the Controls scene lets players remap them and `InputPrompt` shows the bindings (`docs/input.md`).
-7. Do not edit `engine/`. Anything the engine needs from the game goes through the `Game` config table in `main.lua` or a scene hook (for example `updateShaderUniforms`).
+Scroll to zoom, drag to pan. Click or drag the sliders; the arrow keys walk the panel and adjust the selected row. Effect settings are remembered between sessions.
 
-See `CLAUDE.md` for the architecture and engine contracts.
+Hot reload is on in dev: saved edits under `engine/`, `scenes/`, `gameObjects/`, `effects/`, `app/`, `constants/` and `state/` reload automatically (backtick forces it). A dev MCP bridge listens on port 12345.
 
-## Build and release
+## Develop
+
+- The app is `scenes/Viewer.lua` (view transform, loading, export) plus `gameObjects/ControlPanel.lua` (the sliders).
+- Effects are data: add an entry to `effects/init.lua` with its GLSL and parameters and it appears in the panel. `effects/Pipeline.lua` runs the chain over two canvases.
+- Files outside LÖVE's sandbox go through `app/imageIO.lua`; the OS file picker runs on `app/dialogThread.lua` so the window keeps drawing.
+- Scenes live in `scenes/` and are registered in `main.lua` (`Preload` first). See `docs/scenes.md`.
+- `engine/` is the shared engine. Configure it through the `Game` table in `main.lua` rather than editing it.
+- The web build runs on Lua 5.1 (love.js), so avoid `goto` and LuaJIT-only modules. `scripts/lint-lua51.sh` checks every tracked Lua file; enable the pre-commit hook with `git config core.hooksPath .githooks`.
+- Marketing art in `assets/generated/` is rendered from `scenes/assets/*.lua` by `love . --export-assets`.
+
+## Release
 
 ```sh
 scripts/release.sh            # export assets, build Mac/Windows/web/.love, push to itch.io
-scripts/release.sh --no-push  # build only; artefacts land in releases/<PKG>/
-love . --export-assets        # regenerate assets/generated/*.png only
+scripts/release.sh --no-push  # build only; artefacts land in releases/notan/
+/Applications/love.app/Contents/MacOS/love . --export-assets       # regenerate assets/generated/*.png only
 ```
 
-Set `TITLE`, `PKG`, `UTI`, `AUTHOR` and `ITCH` at the top of `scripts/release.sh`. Requires `love-release`, `love.js`, `butler` (logged in), node and the macOS `iconutil`/`sips`/`plutil` tools. See `CLAUDE.md` for details and for which itch.io page images still need a manual upload.
+`TITLE`, `PKG`, `UTI`, `AUTHOR` and `ITCH` are set at the top of `scripts/release.sh`. Requires `love-release`, `love.js`, `butler` (logged in), node and the macOS `iconutil`/`sips`/`plutil` tools.
 
-The web build runs on Lua 5.1 (love.js), not LuaJIT, so avoid `goto` and LuaJIT-only modules. `scripts/lint-lua51.sh` checks every tracked Lua file with a real Lua 5.1 parser; enable the pre-commit hook with `git config core.hooksPath .githooks`. The web page itself is `scripts/web/index.html` plus `theme/love.css`: a bare canvas on black, with no love.js heading or footer.
+See `CLAUDE.md` for the architecture and engine contracts, and `AGENTS.md` for the short version.

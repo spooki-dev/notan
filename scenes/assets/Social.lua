@@ -23,7 +23,7 @@ function AssetSocial:load()
   local padding = 48
   self:addGameObject(UICanvas("AssetSocialUI", {
     Wordmark("AssetSocialMark", {
-      lines = { "NEW", "GAME" },
+      lines = { "NOTAN" },
       subtitle = "Built with spooki-love",
       titleSize = 96,
       subtitleSize = 32,

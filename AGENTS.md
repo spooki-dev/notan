@@ -1,6 +1,6 @@
 # AGENTS.md
 
-LÖVE (Love2D) 11.5 game template in plain Lua. Desktop runs LuaJIT but the love.js web build runs PUC Lua 5.1, so code must stay within the shared 5.1 subset: no `goto`/`::label::`, no `ffi`/`jit`/`bit`, no `table.unpack`. `scripts/lint-lua51.sh` checks this with a real Lua 5.1 parser; the pre-commit hook in `.githooks/` and `scripts/release.sh` both run it. No package manager. The `examples/` catalogue doubles as the regression suite: `scripts/test.sh` runs every example headlessly and CI runs it on push (see `examples/README.md`). `init.sh` at the root scaffolds a new game from this template (wizard for title/author/itch; it rewrites the "New Game" literals, so keep those anchors or update the script).
+Notan: a desktop image tool for painters (open a photo, stack GPU effects over it — blur, levels, saturation, posterise — to read its values as flat shapes), built on the spooki-love LÖVE (Love2D) 11.5 template in plain Lua. Desktop runs LuaJIT but the love.js web build runs PUC Lua 5.1, so code must stay within the shared 5.1 subset: no `goto`/`::label::`, no `ffi`/`jit`/`bit`, no `table.unpack`. `scripts/lint-lua51.sh` checks this with a real Lua 5.1 parser; the pre-commit hook in `.githooks/` and `scripts/release.sh` both run it. No package manager.
 
 ## Run / verify
 
@@ -8,11 +8,12 @@ LÖVE (Love2D) 11.5 game template in plain Lua. Desktop runs LuaJIT but the love
 /Applications/love.app/Contents/MacOS/love .   # `love` is not on PATH
 ```
 
-`scripts/test.sh` runs the Lua 5.1 lint and the examples suite (`scripts/test.sh camera` for one category). Still verify visual changes by running the game; saved edits under the directories listed in the `watch` config in `main.lua` hot-reload on save (backtick key force-reloads). Reload clears `package.loaded`, re-executes `main.lua` and re-runs `love.load()`, so any duplicate GameObject name will throw on reload.
+There is no lint or test command. Verify by running the app (`love . path/to/photo.jpg` opens straight onto an image); saved edits under the directories listed in the `watch` config in `main.lua` hot-reload on save (backtick key force-reloads). Reload clears `package.loaded`, re-executes `main.lua` and re-runs `love.load()`, so any duplicate GameObject name will throw on reload.
 
 ## Structure & conventions
 
-- `engine/` is the reusable engine and must not require anything outside itself. Game code (`scenes/`, `gameObjects/`, `constants/`, `state/`) is wired in from `main.lua`.
+- `engine/` is the reusable engine and must not require anything outside itself. App code (`scenes/`, `gameObjects/`, `effects/`, `app/`, `constants/`, `state/`) is wired in from `main.lua`.
+- The app itself: `scenes/Viewer.lua` (view transform, loading, export), `effects/init.lua` (the chain as data — add an entry and it appears in the panel), `effects/Pipeline.lua` (canvas ping-pong + parameter state), `gameObjects/ControlPanel.lua` (sliders), `app/imageIO.lua` + `app/dialogThread.lua` (files outside LÖVE's sandbox).
 - Requires use dotted module paths: `require "engine.Scene"`, `require "engine.ui.UIBox"`, `require "engine.lib.classic"`. Files never need `.lua`.
 - OOP = vendored `engine/lib/classic.lua` (rxi/classic). Pattern: `local Foo = Base.extend(Base)` and call `Foo.super.new(self, ...)` in the constructor.
 - Scenes live in `scenes/` and are registered from `main.lua` via the `scenes` array in the `Game` config (`Preload` first, because `addScene` runs `load()` immediately). `defaultScene` picks the starting scene. Scene `name` must be unique and `setCurrentScene` errors if called with the current scene.

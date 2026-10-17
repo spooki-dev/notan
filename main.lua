@@ -1,11 +1,10 @@
 local Game = require "engine.Game"
 
 local Preload = require "scenes.Preload"
-local Menu = require "scenes.Menu"
-local GameScene = require "scenes.Game"
+local Viewer = require "scenes.Viewer"
 local Controls = require "scenes.Controls"
 
--- Marketing asset scenes, rendered by `love . --export-assets` (never registered as game scenes).
+-- Marketing asset scenes, rendered by `love . --export-assets` (never registered as app scenes).
 local AssetIcon = require "scenes.assets.Icon"
 local AssetFavicon = require "scenes.assets.Favicon"
 local AssetCover = require "scenes.assets.Cover"
@@ -21,42 +20,33 @@ if os.getenv("LOCAL_LUA_DEBUGGER_VSCODE") == "1" then
   lldebugger.start()
 end
 
--- examples:begin
--- Examples catalogue and regression suite (examples/README.md). Runs instead of
--- the game for `love . --examples`, `love . --example <category>/<slug>` and
--- `love . --test`; init.sh strips this block from scaffolded games.
-if love.filesystem.getInfo("examples/runner/init.lua") then
-  local examplesRunner = require "examples.runner"
-  if examplesRunner.shouldRun(arg) then
-    return examplesRunner.main(arg)
-  end
-end
--- examples:end
-
 Game({
-  title = "New Game",
+  title = "Notan",
   env = "dev",
   -- Registered in order; Preload must come first because addScene runs load() immediately.
-  scenes = { Preload, Menu, GameScene, Controls },
-  defaultScene = "Menu",
+  scenes = { Preload, Viewer, Controls },
+  defaultScene = "Viewer",
   cursors = {
     default = { path = "assets/cursors/default.png", hotX = 8, hotY = 8 },
     active = { path = "assets/cursors/active.png", hotX = 8, hotY = 8 },
   },
-  watch = { "engine", "scenes", "gameObjects", "constants", "state" },
+  watch = { "engine", "scenes", "gameObjects", "constants", "state", "effects", "app" },
   -- Named input actions (see docs/input.md). Each binding is one input:
   -- "key:<scancode>", "mouse:<button>", "pad:<button>", "axis:<axis>+|-".
-  -- The engine adds the locked ui_* menu actions itself; players remap the
-  -- rest in the Controls scene and changes persist to bindings.lua.
+  -- The engine adds the locked ui_* actions itself, which drive the control
+  -- panel; everything below is remappable from the Controls screen.
   input = {
     deadzone = 0.25,
     actions = {
-      { name = "move_left",  label = "Move left",  category = "Movement", bindings = { "key:a", "key:left",  "axis:leftx-", "pad:dpleft" } },
-      { name = "move_right", label = "Move right", category = "Movement", bindings = { "key:d", "key:right", "axis:leftx+", "pad:dpright" } },
-      { name = "move_up",    label = "Move up",    category = "Movement", bindings = { "key:w", "key:up",    "axis:lefty-", "pad:dpup" } },
-      { name = "move_down",  label = "Move down",  category = "Movement", bindings = { "key:s", "key:down",  "axis:lefty+", "pad:dpdown" } },
-      { name = "action",     label = "Action",     category = "Actions",  bindings = { "key:space", "mouse:1", "pad:a" } },
-      { name = "pause",      label = "Menu",       category = "System",   bindings = { "key:escape", "pad:start" } },
+      { name = "open_image",      label = "Open image",     category = "File",    bindings = { "key:o", "pad:y" } },
+      { name = "export_image",    label = "Export PNG",     category = "File",    bindings = { "key:e" } },
+      { name = "toggle_original", label = "Show original",  category = "View",    bindings = { "key:tab", "pad:x" } },
+      { name = "fit_view",        label = "Fit to window",  category = "View",    bindings = { "key:0", "pad:leftstick" } },
+      { name = "actual_size",     label = "Actual size",    category = "View",    bindings = { "key:1" } },
+      { name = "toggle_panel",    label = "Hide panel",     category = "View",    bindings = { "key:h", "pad:back" } },
+      { name = "toggle_grid",     label = "Toggle grid",    category = "Effects", bindings = { "key:g", "pad:rightshoulder" } },
+      { name = "reset_effects",   label = "Reset effects",  category = "Effects", bindings = { "key:r" } },
+      { name = "open_controls",   label = "Key bindings",   category = "System",  bindings = { "key:c", "pad:start" } },
     },
   },
   -- Exported to assets/generated/<name>.png; scripts/release.sh bakes icon/favicon into the builds.

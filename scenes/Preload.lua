@@ -15,10 +15,12 @@ function Preload:new()
 end
 
 function Preload:load()
-  cacheManager.preloadFont("header", "assets/fonts/PixelOperator8.ttf", 24)
-  cacheManager.preloadFont("subheader", "assets/fonts/PixelOperator8.ttf", 20)
-  cacheManager.preloadFont("body", "assets/fonts/PixelOperator8.ttf", 16)
-  cacheManager.preloadFont("small", "assets/fonts/PixelOperator8.ttf", 12)
+  -- nil path means LOVE's built-in default font, so the UI reads as plain system
+  -- text rather than the pixel face.
+  cacheManager.preloadFont("header", nil, 24)
+  cacheManager.preloadFont("subheader", nil, 20)
+  cacheManager.preloadFont("body", nil, 15)
+  cacheManager.preloadFont("small", nil, 12)
   -- Button prompt glyphs (Kenney Input Prompts Pixel 16x), read by engine/input/glyphs.lua.
   cacheManager.preloadImage(glyphs.IMAGE_KEY, glyphs.IMAGE_PATH)
 end

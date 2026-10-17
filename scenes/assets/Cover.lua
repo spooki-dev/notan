@@ -23,7 +23,7 @@ function AssetCover:load()
   local padding = 24
   self:addGameObject(UICanvas("AssetCoverUI", {
     Wordmark("AssetCoverMark", {
-      lines = { "NEW", "GAME" },
+      lines = { "NOTAN" },
       subtitle = "Built with spooki-love",
       titleSize = 64,
       subtitleSize = 16,

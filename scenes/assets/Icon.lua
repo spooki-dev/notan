@@ -26,7 +26,7 @@ function AssetIcon:load()
   self:addGameObject(UICanvas("AssetIconUI", {
     UIBox("AssetIconFrame", {
       Wordmark("AssetIconMark", {
-        lines = { "NEW", "GAME" },
+        lines = { "NOTAN" },
         titleSize = 96,
         canvasHeight = innerHeight - border * 2,
       }),

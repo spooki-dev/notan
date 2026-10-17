@@ -1,7 +1,7 @@
 function love.conf(t)
-  t.window.title = "New Game"
+  t.window.title = "Notan"
   -- Pins the save directory name so saves are shared between source runs and fused builds.
-  t.identity = "newgame"
+  t.identity = "notan"
   t.window.width = 1280
   t.window.height = 720
   t.window.resizable = true

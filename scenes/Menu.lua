@@ -41,7 +41,7 @@ function Menu:load()
         height = 150,
       }),
       UIBox("MenuContent", {
-        UIText("MenuTitle", "NEW GAME", {
+        UIText("MenuTitle", "NOTAN", {
           font = "header",
           textAlign = "center",
           color = colors.vec4Yellow,

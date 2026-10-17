@@ -23,7 +23,7 @@ function AssetWide:load()
   local padding = 64
   self:addGameObject(UICanvas("AssetWideUI", {
     Wordmark("AssetWideMark", {
-      lines = { "NEW", "GAME" },
+      lines = { "NOTAN" },
       subtitle = "Built with spooki-love",
       titleSize = 128,
       subtitleSize = 48,

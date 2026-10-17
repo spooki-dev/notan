@@ -18,7 +18,7 @@
 ---@field getSound fun(key: string): love.Source
 ---@field preloadMusic fun(key: string, path: string): nil
 ---@field getMusic fun(key: string): love.Source
----@field preloadFont fun(key: string, path: string, size: number, hinting: love.HintingMode|nil): nil
+---@field preloadFont fun(key: string, path: string|nil, size: number, hinting: love.HintingMode|nil): nil
 ---@field hasFont fun(key: string): boolean
 ---@field getFont fun(key: string): love.Font
 ---@field getSpritePosition fun(sourceW: number, frameW: number, frameH: number, index: number): table<number>
@@ -137,12 +137,17 @@ end
 
 --- Preloads a font under a key
 --- @param key string Cache key
---- @param path string Path to the font file
+--- @param path string|nil Path to the font file, or nil for LOVE's built-in font
 --- @param size number Point size
 --- @param hinting love.HintingMode|nil Optional hinting mode ("normal", "light", "mono", "none")
 function cacheManager.preloadFont(key, path, size, hinting)
   if not fonts[key] then
-    local font = love.graphics.newFont(path, size, hinting)
+    local font
+    if path then
+      font = love.graphics.newFont(path, size, hinting)
+    else
+      font = love.graphics.newFont(size, hinting)
+    end
     fonts[key] = font
   else
     error("Font already preloaded: " .. key)

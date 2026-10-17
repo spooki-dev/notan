@@ -4,18 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A LÖVE (Love2D) 11.5 game template written in plain Lua (LuaJIT on desktop, PUC Lua 5.1 in the love.js web build). The reusable engine lives under `engine/` and must not require anything outside it; the game is configured from `main.lua`. Input is action-based (`engine/input/`): game code reads named actions, never keys or gamepad buttons directly, so every game gets remapping, gamepad support and on-screen prompts for free (see `docs/input.md`). No build step or package manager. `scripts/test.sh` runs the examples regression suite (see Examples and tests below), and CI runs it on every push.
+Notan is a desktop image tool for painters, not a game: it opens a photo and applies a stack of GPU effects to it — blur, levels, saturation, posterise — so the values in a reference can be read as flat shapes before painting them. It is built on the spooki-love LÖVE (Love2D) 11.5 template, written in plain Lua (LuaJIT on desktop, PUC Lua 5.1 in the love.js web build). The reusable engine lives under `engine/` and must not require anything outside it; the app is configured from `main.lua`. Input is action-based (`engine/input/`): game code reads named actions, never keys or gamepad buttons directly, so every game gets remapping, gamepad support and on-screen prompts for free (see `docs/input.md`). No build step or package manager.
 
 `docs/*.md` is published at https://spookidev.com/spooki-love/docs (the site pulls `main` at build time). Every page needs `title`, `description` and `order` frontmatter and no H1; file names are the URL slugs; link between pages as `scenes.md` and to source as repo-root paths like `engine/Scene.lua`. See `docs/README.md`.
 
-## Running the Game
+## Running the App
 
 ```sh
 # love is not on PATH on macOS:
 /Applications/love.app/Contents/MacOS/love .
+/Applications/love.app/Contents/MacOS/love . path/to/photo.jpg   # open straight onto an image
 ```
 
-`scripts/test.sh` runs the lint and the examples suite; still verify visual changes by running the game. The one lint is `scripts/lint-lua51.sh` (see below). Hot-reload is active in dev mode — saved edits under the directories listed in the `watch` config in `main.lua` reload automatically. Backtick key force-reloads. Reload clears `package.loaded`, re-executes `main.lua` and re-runs `love.load()`, so **duplicate GameObject names will throw on reload**. `main.lua` sets `io.stdout:setvbuf("no")` so prints appear immediately when stdout is piped.
+Keys: `O` open, `E` export a PNG next to the source, `TAB` hold to see the original, `0` fit, `1` 100%, `G` toggle the grid, `R` reset the effects, `H` hide the panel, `C` key bindings. Images can also be dragged onto the window. Arrow keys move through the panel and adjust the selected slider.
+
+There is no test command. Verify changes by running the app. The one lint is `scripts/lint-lua51.sh` (see below). Hot-reload is active in dev mode — saved edits under the directories listed in the `watch` config in `main.lua` reload automatically. Backtick key force-reloads. Reload clears `package.loaded`, re-executes `main.lua` and re-runs `love.load()`, so **duplicate GameObject names will throw on reload**. `main.lua` sets `io.stdout:setvbuf("no")` so prints appear immediately when stdout is piped.
 
 ### Lua 5.1 compatibility (web build)
 
@@ -24,10 +27,6 @@ love.js runs the game on PUC Lua 5.1, not LuaJIT, so game and engine code must s
 - `.luarc.json` sets the LuaLS runtime to `Lua 5.1`, so the editor flags these as syntax errors.
 - `scripts/lint-lua51.sh [files...]` parses files with a real `luac` 5.1 (`-p`, no execution). It builds Lua 5.1.5 from the official tarball into `~/.cache/love-release/` on first run because Homebrew no longer ships `lua@5.1`. With no arguments it checks every tracked `.lua` file.
 - `.githooks/pre-commit` runs that lint over staged Lua files. Enable it per clone with `git config core.hooksPath .githooks`. `scripts/release.sh` also runs it over the contents of the built `.love` before packaging anything.
-
-### Examples and tests
-
-`examples/<category>/<slug>.lua` are small scenes that each show one engine feature; they are published at https://spookidev.com/spooki-love/examples and double as the regression suite. `love . --examples` opens a picker, `love . --example camera/follow` runs one, and `scripts/test.sh [--update-snapshots] [ids...]` runs every example for 120 frames at a fixed dt with scripted input, its `check` assertions and a golden screenshot compared against `examples/__snapshots__/`. Each example runs in a fresh engine (`package.loaded` is purged between them). `examples/README.md` has the conventions: header comments (`-- title:`, `-- description:`), scene name = id, shared actions from `examples/runner/actions.lua`, assets preloaded by `examples/runner/preload.lua`, deterministic drawing. `main.lua` hands over to `examples/runner` between the `-- examples:begin` / `-- examples:end` anchors; `init.sh` strips the block, `examples/`, `scripts/test.sh` and `.github/workflows/ci.yml` from scaffolded games, and `scripts/release.sh` excludes `examples/` from the `.love`. When an engine change is intentional, update the affected goldens with `--update-snapshots` and review the image diff.
 
 ### Build and release
 
@@ -47,10 +46,6 @@ Notes:
 - butler can only push build channels. itch.io has no API for cover/screenshot images, so those remain a manual upload. The "This file will be played in the browser" flag must be ticked on the *web* channel upload on the edit page (once, after the first push); ticking it on the `.love` upload fails with "Failed to find index.html".
 - butler comes from https://itch.io/docs/butler/ (the Homebrew `butler` cask is an unrelated app). Run `butler login` once in a real terminal.
 
-### Scaffolding
-
-`init.sh` (repo root) copies the template into a new directory and runs a wizard (title, author, itch.io username; `--yes` and flags for non-interactive use), then rewrites every place the template says "New Game": `conf.lua` (window title and `t.identity`), `main.lua`, the `"NEW GAME"` / `{ "NEW", "GAME" }` / `{ "N" }` wordmark literals in `scenes/Menu.lua` and `scenes/assets/*.lua`, the `TITLE`/`PKG`/`UTI`/`AUTHOR`/`ITCH` lines in `scripts/release.sh`, this file's example config, and fresh `README.md`/`CHANGELOG.md`. Those literals are anchors: the script fails if one is missing, so renaming them in the template means updating `init.sh` too. It copies `git ls-files --cached --others --exclude-standard`, so ignored files never leak into a new game, deletes itself from the copy, and strips this section and the `init.sh` sentence in `AGENTS.md` (anchors too) since the new game has no scaffolder. `scripts/release.sh` excludes it from the `.love`.
-
 ### Marketing assets
 
 `assets/generated/*.png` are rendered by the game itself from `scenes/assets/*.lua` via `engine/AssetExporter.lua`, so a colour or font change regenerates them (and shows up as an image diff in git). The `assets` block in `main.lua` lists each item with its exact pixel size, `postProcess = true` to run the post-processing shader chain (if any shaders are configured), or `transparent = true` for an alpha background (the two are mutually exclusive, shaders force alpha to 1). Asset scenes take `(width, height)` in their constructor, pass them to a `UICanvas` via `styles.width/height`, and compose text with `gameObjects/Wordmark.lua`, which lazily loads fonts under keys `asset-<size>` (sizes in multiples of 8 for PixelOperator8). Edit the `lines`/`subtitle` in each asset scene for your game.
@@ -67,14 +62,14 @@ Notes:
 
 ```lua
 Game({
-  title = "New Game",
+  title = "Notan",
   env = "dev",                      -- enables hot reload and the MCP bridge
-  scenes = { Preload, Menu, GameScene },
-  defaultScene = "Menu",
+  scenes = { Preload, Viewer, Controls },
+  defaultScene = "Viewer",
   cursors = { default = { path = "assets/cursors/default.png", hotX = 8, hotY = 8 }, active = { ... } },
   shaders = {},                     -- optional post-processing chain, in order
-  watch = { "engine", "scenes", "gameObjects", "constants", "state" },
-  input = { deadzone = 0.25, actions = { { name = "jump", label = "Jump", category = "Actions", bindings = { "key:space", "pad:a" } }, ... } },
+  watch = { "engine", "scenes", "gameObjects", "constants", "state", "effects", "app" },
+  input = { deadzone = 0.25, actions = { { name = "open_image", label = "Open image", category = "File", bindings = { "key:o", "pad:y" } }, ... } },
   assets = { outputDir = "assets/generated", items = { { name = "icon", scene = AssetIcon, width = 1024, height = 1024 }, ... } },
 })
 ```
@@ -115,6 +110,7 @@ Game({
 - **Prompt sheet**: `InputPrompt` needs `cacheManager.preloadImage(glyphs.IMAGE_KEY, glyphs.IMAGE_PATH)` in `Preload`; without it prompts fall back to drawn text keycaps.
 - **Save identity**: `conf.lua` sets `t.identity`, which names the save directory holding `bindings.lua` and `windowpos.txt`.
 - **Quit hook**: `Game:quit` calls `onQuit()` on the current scene if defined. Autosave there.
+- **Window hooks**: `Game` forwards `love.filedropped`/`love.directorydropped`/`love.resize` to the current scene as optional `filedropped(file)`, `directorydropped(path)` and `resize(w, h)` methods. A dropped file's `getFilename()` is its absolute path.
 
 ### Saving
 
@@ -137,10 +133,9 @@ end
 ### Scenes (`scenes/`)
 
 - `Preload.lua` — preloads fonts via cacheManager. Never made current; registered first for its `load()` side effect.
-- `Menu.lua` — default scene. Start → `Game`, Controls → `Controls`; a `FocusGroup` makes it keyboard/gamepad navigable and `InputPrompt`s show the navigation keys.
-- `Game.lua` — empty scene to build on.
-- `Controls.lua` — rebinding screen: every unlocked action by category with a keyboard/mouse and a gamepad cell, press-to-rebind, stolen-binding notice, reset, back. Navigable with mouse, keyboard or pad. Keep it; add your actions to `main.lua` and they appear.
-- `Controls.lua` — rebinding screen: every unlocked action by category with a keyboard/mouse and a gamepad cell, press-to-rebind, stolen-binding notice, reset, back. Navigable with mouse, keyboard or pad. Keep it; add your actions to `main.lua` and they appear.
+- `Viewer.lua` — the app. Default scene: owns the Pipeline, the pan/zoom transform, image loading (drop, picker, command-line argument), PNG export and the saved settings.
+- `Controls.lua` — rebinding screen: every unlocked action by category with a keyboard/mouse and a gamepad cell, press-to-rebind, stolen-binding notice, reset, back. Navigable with mouse, keyboard or pad. Add actions to `main.lua` and they appear here.
+- `Menu.lua` and `Game.lua` are leftovers from the template, no longer registered in `main.lua`.
 
 Scene names (passed to `Scene.super.new(self, "Name")`) must be unique. To add a scene, create it in `scenes/`, require it in `main.lua` and add it to the `scenes` array. See `docs/scenes.md`.
 
@@ -161,6 +156,19 @@ Key quirks:
 - UI objects default to the `ui` layer (drawn without camera transform).
 - `UIBar(name, ...)` names its children `name .. "Container"` and `name .. "BarContainer"`.
 
+### App-side code
+
+| Path | Purpose |
+|---|---|
+| `effects/init.lua` | The effect chain as data: one entry per GPU pass with its GLSL source, the parameters the panel exposes and a `send` that pushes them as uniforms. List order is processing order (blur → levels → saturation → posterise). Add an entry here and it appears in the panel, the saved settings and the reset action with no other change. An entry marked `overlay = true` carries parameters but no GLSL: the Pipeline skips it and `Viewer` draws it over the image instead (the grid, whose lines must stay a pixel wide at every zoom). |
+| `effects/Pipeline.lua` | Owns the working-size copy of the image and two canvases, ping-pongs the enabled effects over them, and caches the result until `markDirty()`. Also holds every parameter value, so the panel and the renderer never disagree. |
+| `app/grid.lua` | The composition grid: evenly spaced lines over a rectangle, drawn in screen space by `Viewer:draw` and at image scale by `Viewer:exportImageData` so the export matches the window. |
+| `app/imageIO.lua` | Reading and writing images outside LÖVE's sandbox: paths are read with plain `io` and handed to `love.image` as FileData. Also builds the host OS file-picker command. |
+| `app/dialogThread.lua` | Runs that picker command on a thread, because `io.popen` blocks until the dialog closes. Pushes the chosen path on a channel; `Viewer:update` polls for it. |
+| `gameObjects/ControlPanel.lua` | The side panel. Drawn by hand rather than composed from `engine/ui`, which has no slider and no drag; rows are flattened so the mouse and the `ui_*` actions address the same thing. |
+
+Images larger than 4096px on the long edge are scaled down once on load (`MAX_EDGE` in `effects/Pipeline.lua`): every pass costs width × height, and nothing about judging values needs more.
+
 ### Game-side code
 
 - `constants/colors.lua` — palette (`black`, `dark`, `light`, `white`, `green`, `yellow`, `grey`) plus `vec4*` variants. UI code passes `Vector4(r,g,b,a)`. Menu and the asset scenes take their title colours from here.
@@ -178,6 +186,6 @@ Every scene has three default layers: `ground` (z=1), `entities` (z=2), `ui` (z=
 - Nothing under `engine/` may require from `scenes/`, `gameObjects/`, `constants/` or `state/`. Inject game data through the `Game` config or scene hooks instead.
 - Avoid creating tables/objects inside `update` or `draw` loops (GC pressure).
 - Use `assert()` for internal logic checks; custom error logging for non-fatal issues.
-- Preloaded font keys: `header`, `subheader`, `body`, `small` (PixelOperator8.ttf). Asset scenes add `asset-<size>` on demand.
+- Preloaded font keys: `header`, `subheader`, `body`, `small` (LOVE's built-in default font: `preloadFont` with a `nil` path). Asset scenes add `asset-<size>` from PixelOperator8.ttf on demand.
 - Window: 1280x720, resizable, min 1024x600.
 - Input: declare actions in `main.lua`, read them with `inputMap`, show them with `InputPrompt`.

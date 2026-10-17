@@ -23,7 +23,7 @@ function AssetLogo:load()
   local padding = 16
   self:addGameObject(UICanvas("AssetLogoUI", {
     Wordmark("AssetLogoMark", {
-      lines = { "NEW GAME" },
+      lines = { "NOTAN" },
       subtitle = "Built with spooki-love",
       titleSize = 72,
       subtitleSize = 24,

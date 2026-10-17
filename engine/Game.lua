@@ -155,6 +155,14 @@ function Game:initializeEvents()
     self:resize(w, h)
   end
 
+  function love.filedropped(file)
+    self:filedropped(file)
+  end
+
+  function love.directorydropped(path)
+    self:directorydropped(path)
+  end
+
   function love.quit()
     self:quit()
   end
@@ -311,6 +319,19 @@ end
 
 function Game:resize(w, h)
   self.postProcessing:resize(w, h)
+  self.sceneManager.resize(w, h)
+end
+
+--- A file was dropped on the window; handed to the current scene.
+---@param file love.File
+function Game:filedropped(file)
+  self.sceneManager.fileDropped(file)
+end
+
+--- A folder was dropped on the window; handed to the current scene.
+---@param path string
+function Game:directorydropped(path)
+  self.sceneManager.directoryDropped(path)
 end
 
 -- Raw events go to inputMap first (rebind capture, active-device tracking,

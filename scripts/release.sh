@@ -12,12 +12,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-TITLE="New Game"
-PKG=newgame
-UTI=com.example.newgame
-AUTHOR="Your Name"
-ITCH=your-itch-username/your-game-slug
-ITCH_EDIT_URL="https://your-itch-username.itch.io/your-game-slug/edit"
+TITLE="Notan"
+PKG=notan
+UTI=com.spooki.notan
+AUTHOR="George Butter"
+ITCH=your-itch-username/notan
+ITCH_EDIT_URL="https://your-itch-username.itch.io/notan/edit"
 LOVE=/Applications/love.app/Contents/MacOS/love
 export PATH="$(dirname "$LOVE"):$PATH"   # love-release shells out to `love`
 # love-release only supports LÖVE <= 11.3, so Mac/Windows packages are built

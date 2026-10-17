@@ -175,7 +175,7 @@ function Controls:load()
   end
 
   function backButton:onClick()
-    sceneManager.setCurrentScene("Menu")
+    sceneManager.setCurrentScene("Viewer")
   end
 
   self.focus:add(resetButton):add(backButton)
@@ -253,7 +253,7 @@ end
 ---@param name string
 function Controls:onActionPressed(name)
   if name == "ui_cancel" and not self.capturing then
-    sceneManager.setCurrentScene("Menu")
+    sceneManager.setCurrentScene("Viewer")
   end
 end
 

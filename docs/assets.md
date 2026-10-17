@@ -12,7 +12,7 @@ Every asset the game draws or plays goes through `engine/cacheManager.lua`, keye
 
 | Function | Loads | Notes |
 |---|---|---|
-| `preloadFont(key, path, size, hinting)` | `love.graphics.newFont` | `hinting` is optional (`"normal"`, `"light"`, `"mono"`, `"none"`). `hasFont(key)` checks without erroring. |
+| `preloadFont(key, path, size, hinting)` | `love.graphics.newFont` | A `nil` `path` loads LOVE's built-in default font. `hinting` is optional (`"normal"`, `"light"`, `"mono"`, `"none"`). `hasFont(key)` checks without erroring. |
 | `preloadImage(key, path)` | `love.graphics.newImage` | Read back with `getImage(key)`. |
 | `preloadSpritesheet(key, path, frameWidth, frameHeight, keys)` | image plus one quad per name in `keys` | `getSpritesheet(key)` returns `{ image, quads }`; frames are indexed left to right, top to bottom. |
 | `preloadSound(key, path)` | `love.audio.newSource(path, "static")` | Short effects, fully decoded. |
@@ -22,10 +22,10 @@ Every asset the game draws or plays goes through `engine/cacheManager.lua`, keye
 
 ```lua
 function Preload:load()
-  cacheManager.preloadFont("header", "assets/fonts/PixelOperator8.ttf", 24)
-  cacheManager.preloadFont("subheader", "assets/fonts/PixelOperator8.ttf", 20)
-  cacheManager.preloadFont("body", "assets/fonts/PixelOperator8.ttf", 16)
-  cacheManager.preloadFont("small", "assets/fonts/PixelOperator8.ttf", 12)
+  cacheManager.preloadFont("header", nil, 24)
+  cacheManager.preloadFont("subheader", nil, 20)
+  cacheManager.preloadFont("body", nil, 15)
+  cacheManager.preloadFont("small", nil, 12)
   cacheManager.preloadImage(glyphs.IMAGE_KEY, glyphs.IMAGE_PATH)
 end
 ```
@@ -34,7 +34,7 @@ Add your own spritesheets, sounds and music to the same function. `Preload` is n
 
 ### Font keys
 
-`engine/ui` looks fonts up by key, so these four names are a contract (see `engine.md#contracts`): `body` is the `UIText` default, `small` is used by `Button` and `UIBar`, and `header`/`subheader` are for your own titles. All four come from `assets/fonts/PixelOperator8.ttf`. Pixel Operator renders cleanly at multiples of 8, which is why the marketing scenes use sizes like 48, 64, 96 and 128.
+`engine/ui` looks fonts up by key, so these four names are a contract (see `engine.md#contracts`): `body` is the `UIText` default, `small` is used by `Button` and `UIBar`, and `header`/`subheader` are for your own titles. All four are LOVE's built-in default font, loaded by passing `nil` as the path. The marketing scenes use `assets/fonts/PixelOperator8.ttf` instead; Pixel Operator renders cleanly at multiples of 8, which is why they use sizes like 48, 64, 96 and 128.
 
 The asset scenes add fonts lazily under `asset-<size>` keys. `gameObjects/Wordmark.lua` does this in `Wordmark.font(size)`: it checks `cacheManager.hasFont("asset-" .. size)` and calls `preloadFont` with `"mono"` hinting on first use, so glyph edges stay binary and transparent exports have no fringes.
 

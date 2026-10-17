@@ -26,7 +26,7 @@ function AssetFavicon:load()
   self:addGameObject(UICanvas("AssetFaviconUI", {
     UIBox("AssetFaviconFrame", {
       Wordmark("AssetFaviconMark", {
-        lines = { "N" },
+        lines = { "P" },
         titleSize = 48,
         canvasHeight = innerHeight - border * 2,
       }),

@@ -1,28 +1,7 @@
 # Changelog
 
-## 2026-10-02 (examples and tests)
+## 2026-10-15
 
-- Examples catalogue and regression suite: 47 runnable scenes under `examples/<category>/<slug>.lua` across scenes, game objects, animation, camera, input, UI, collision, lighting, post-processing, utilities and saves. `love . --examples` opens a picker, `love . --example <id>` runs one with hot reload, and `scripts/test.sh` drives every example for 120 frames at a fixed dt with scripted input, per-example `check` assertions and golden screenshots in `examples/__snapshots__/` (also the thumbnails at https://spookidev.com/spooki-love/examples). `.github/workflows/ci.yml` runs it on push and pull request. See `examples/README.md` and `docs/examples.md`.
-- `main.lua` hands over to `examples/runner` between `-- examples:begin` / `-- examples:end`; `init.sh` strips the block and the examples tooling from scaffolded games; `scripts/release.sh` excludes `examples/`; `scripts/lint-lua51.sh` builds Lua 5.1 with the `generic` target off macOS.
-- Engine fixes found by the suite: `GameObject:destroy()` destroyed only every second child (it iterated the list each child removed itself from); `inputMap.resetToDefaults(name)` crashed for a single action (the assert message joined the list); Theta* recorded the wrong predecessor when there was no line of sight, so paths could cut through walls; the vendored Shädows library could never be required (it registered itself only as `shadows`, not `engine.lib.shadows`) and `LightWorld:GetColor` returned blue and alpha swapped; scene draw order now breaks ties on object name so equal-priority objects render in a stable order.
-- `notify-site.yml` also tells the site to rebuild when examples or engine code change.
+- Added a composition grid: a Grid section in the panel with vertical and horizontal line counts, `G` to toggle it, drawn over the image at any zoom and burned into the export.
 
-## 2026-10-02
-
-- Documentation rewritten as nine pages under `docs/` (getting started, scenes, game objects, UI, input, engine, assets, build and release, development), each with `title`/`description`/`order` frontmatter so https://spookidev.com/spooki-love/docs can render them. The old `CreatingANewScene.md`, `UiComponents.md` and `features.md` are folded in. `.github/workflows/notify-site.yml` tells the site to rebuild when `docs/**` changes on `main` (needs the `SITE_DISPATCH_TOKEN` secret).
-- Action-based input (`engine/input/inputMap.lua`): named actions with keyboard, mouse and gamepad bindings, analog strength, `axis`/`vector` composition, per-frame edges and `onActionPressed`/`onActionReleased` events, single player on any device. Custom bindings persist to `bindings.lua` in the save directory.
-- Button prompts: Kenney Input Prompts Pixel 16× (CC0) in `assets/graphics/input-prompts.png`, indexed by `engine/input/glyphs.lua`; `engine/ui/InputPrompt.lua` shows an action's bindings for the active device.
-- Menus with a gamepad: `engine/ui/FocusGroup.lua` and focusable `Button`s driven by the built-in locked `ui_*` actions; the Menu is navigable and gains a Controls button.
-- `scenes/Controls.lua` rebinding screen, listing whatever actions `main.lua` declares.
-- `UIText` accepts percentage widths; hidden objects no longer receive clicks; the unused `engine/InputManager.lua` is gone.
-- `engine/saveManager.lua`: single-slot save file in the save directory, serialised as Lua source; `save`/`load`/`exists`/`delete` never throw, saves carry a schema `version` with an optional `migrate` hook. `Game:quit` now calls the current scene's optional `onQuit()`; `sceneManager.addScene`/`resetScene` return the instance and `getScene(name)` was added.
-- Engine fixes: `State:reset()` restores the defaults (the initial table is deep-copied; before, `set` mutated it), `table_serialize.deserialize` uses `loadstring` so it runs under PUC Lua 5.1, rejects non-finite numbers and emits sorted keys, and `utils/table.lua` gains `deepCopy` and a working `getTableSize`.
-- `conf.lua` sets `t.identity = "newgame"` (rewritten by `init.sh`) so saves share one directory between source runs and builds; `scripts/web/index.html` flushes the IndexedDB save directory on `pagehide`, tab hide and every 10 s.
-- `init.sh` scaffold wizard: copies the template into a new directory (or renames a clone in place), asks for title/author/itch.io username, and rewrites the window title, wordmarks, release variables, README and changelog. `scripts/release.sh` excludes it from the `.love`.
-- Lua 5.1 compatibility for the love.js web build: `UIBox` layout loops no longer use `goto` (PUC Lua 5.1 rejects it, so the browser build crashed on load).
-- `scripts/lint-lua51.sh` parses Lua with a real `luac` 5.1 (built once into `~/.cache/love-release/`); `.githooks/pre-commit` and `scripts/release.sh` run it, and `.luarc.json` now targets Lua 5.1 so the editor flags the same errors.
-- Bare web page template in `scripts/web/` replaces the stock love.js page (no heading, footer or "Powered by" text); the release checklist explains the itch.io browser-play flag.
-
-## 2026-09-29
-
-- Initial engine template extracted from "Houston, We Have a Problem".
+- Scaffolded from [spooki-love](https://github.com/spooki-dev/spooki-love) (40ed39e).

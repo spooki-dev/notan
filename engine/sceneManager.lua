@@ -147,6 +147,28 @@ function sceneManager.wheelMoved(x, y)
   end
 end
 
+--- A file was dragged onto the window. Forwarded only if the current scene
+--- defines it; the scene gets LOVE's DroppedFile, whose getFilename() is the
+--- absolute path on disk.
+--- @param file love.File The dropped file
+function sceneManager.fileDropped(file)
+  sceneManager.checkAndCallSceneFunction("filedropped", file)
+end
+
+--- A folder was dragged onto the window. See fileDropped.
+--- @param path string Absolute path of the dropped directory
+function sceneManager.directoryDropped(path)
+  sceneManager.checkAndCallSceneFunction("directorydropped", path)
+end
+
+--- The window was resized. Forwarded only if the current scene defines it, so
+--- scenes that lay out against the window size can reflow.
+--- @param w number New width
+--- @param h number New height
+function sceneManager.resize(w, h)
+  sceneManager.checkAndCallSceneFunction("resize", w, h)
+end
+
 --- A finger touched the screen this frame. `id` identifies the touch across
 --- move/release so multiple simultaneous touches (e.g. steer + throttle) can
 --- be tracked independently; forwarded only if the current scene defines it.

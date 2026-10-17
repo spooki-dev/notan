@@ -166,7 +166,7 @@ Fonts are looked up by key through `cacheManager.getFont`, which errors on a mis
 | `small` | `Button` label, `UIBar` label and value, `InputPrompt` default |
 | `header`, `subheader` | Game scenes (Menu uses `header`); preloaded alongside the others |
 
-`scenes/Preload.lua` preloads all four from `assets/fonts/PixelOperator8.ttf` and is registered first in `main.lua` because `sceneManager.addScene` runs `load()` immediately, so any scene that builds UI in `load()` needs the fonts cached before it is registered. See `assets.md#fonts`.
+`scenes/Preload.lua` preloads all four from LOVE's built-in default font (a `nil` path) and is registered first in `main.lua` because `sceneManager.addScene` runs `load()` immediately, so any scene that builds UI in `load()` needs the fonts cached before it is registered. See `assets.md#fonts`.
 
 `Button` calls `cursorManager.setCursor("active")` on mouse enter and `cursorManager.setCursor("default")` on exit. `setCursor` errors on an unknown key, so a game that uses `Button` must define both `default` and `active` in the `cursors` block of the `Game` config (see `engine.md`).
 
