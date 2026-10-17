@@ -5,3 +5,6 @@ designs
 .aider*
 .claude/settings.local.json
 scripts/node_modules/
+
+# Reference photos used for screenshots; local only.
+assets/sample-photos/
