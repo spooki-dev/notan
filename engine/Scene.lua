@@ -297,6 +297,26 @@ function Scene:removeGameObject(gameObject)
   end
 end
 
+---Remove a GameObject and every descendant it put in the scene.
+---
+---`GameObject:addGameObject` registers a child with the scene as well as with
+---its parent, so taking a composite object out one object at a time leaves its
+---children behind: still drawn, still answering input, and still holding their
+---names, which turns the next attempt to build the same thing into a duplicate
+---name error. Anything assembled from nested objects -- a UICanvas and its
+---boxes, say -- should come out through here.
+---@param gameObject GameObject
+function Scene:removeGameObjectTree(gameObject)
+  if not gameObject then return end
+  local children = gameObject.gameObjects
+  if type(children) == "table" then
+    for i = #children, 1, -1 do
+      self:removeGameObjectTree(children[i])
+    end
+  end
+  self:removeGameObject(gameObject)
+end
+
 ---Destroy a GameObject by reference or name
 ---@param gameObjectOrName GameObject|string
 function Scene:destroyGameObject(gameObjectOrName)

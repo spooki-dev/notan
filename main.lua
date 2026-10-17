@@ -34,6 +34,18 @@ Game({
     active = { path = "assets/cursors/active.png", hotX = 8, hotY = 8 },
   },
   watch = { "engine", "scenes", "gameObjects", "constants", "state", "effects", "app" },
+  -- The device file picker (engine/device/filePicker.lua) is how an image gets
+  -- in on every platform. Bytes rather than a decoded Image, because the
+  -- Pipeline wants ImageData so it can read the dimensions and downscale
+  -- before making a texture. 64 MiB because a photo straight off a camera can
+  -- be far larger than the 16 MiB default.
+  device = {
+    filePicker = {
+      deliver = "bytes",
+      accept = { "image/*" },
+      maxBytes = 64 * 1024 * 1024,
+    },
+  },
   -- Named input actions (see docs/input.md). Each binding is one input:
   -- "key:<scancode>", "mouse:<button>", "pad:<button>", "axis:<axis>+|-".
   -- The engine adds the locked ui_* actions itself, which drive the control

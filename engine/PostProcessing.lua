@@ -1,4 +1,5 @@
 local Object = require "engine.lib.classic"
+local pixelFormat = require "engine.utils.pixelFormat"
 
 ---@class PostProcessing : Object
 ---@field shaders table[] Ordered list of shader definitions
@@ -21,8 +22,8 @@ end
 --- Creates canvases at current screen dimensions. Call after window setup.
 function PostProcessing:load()
   local w, h = love.graphics.getDimensions()
-  self.canvas = love.graphics.newCanvas(w, h)
-  self.swapCanvas = love.graphics.newCanvas(w, h)
+  self.canvas = pixelFormat.newCanvas(w, h)
+  self.swapCanvas = pixelFormat.newCanvas(w, h)
 end
 
 --- Adds a shader definition to the chain.
@@ -108,8 +109,8 @@ function PostProcessing:process(source, scene)
     scene:updateShaderUniforms(self.uniforms, 0)
   end
   local w, h = source:getDimensions()
-  local a = love.graphics.newCanvas(w, h)
-  local b = love.graphics.newCanvas(w, h)
+  local a = pixelFormat.newCanvas(w, h)
+  local b = pixelFormat.newCanvas(w, h)
   love.graphics.push("all")
   love.graphics.setCanvas(a)
   love.graphics.clear(0, 0, 0, 0)
@@ -131,8 +132,8 @@ end
 ---@param w number New width
 ---@param h number New height
 function PostProcessing:resize(w, h)
-  self.canvas = love.graphics.newCanvas(w, h)
-  self.swapCanvas = love.graphics.newCanvas(w, h)
+  self.canvas = pixelFormat.newCanvas(w, h)
+  self.swapCanvas = pixelFormat.newCanvas(w, h)
 end
 
 return PostProcessing
