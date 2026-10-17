@@ -1,4 +1,5 @@
 local Game = require "engine.Game"
+local system = require "engine.utils.system"
 
 local Preload = require "scenes.Preload"
 local Viewer = require "scenes.Viewer"
@@ -22,7 +23,9 @@ end
 
 Game({
   title = "Notan",
-  env = "dev",
+  -- Hot reload and the MCP bridge are dev-only, and both are pointless in a
+  -- browser: the source is a zip that cannot change and there is no socket.
+  env = system.isWeb() and "prod" or "dev",
   -- Registered in order; Preload must come first because addScene runs load() immediately.
   scenes = { Preload, Viewer, Controls },
   defaultScene = "Viewer",

@@ -7,6 +7,8 @@ local saveManager = require "engine.saveManager"
 local Pipeline = require "effects.Pipeline"
 local effects = require "effects"
 local imageIO = require "app.imageIO"
+local webBridge = require "app.webBridge"
+local system = require "engine.utils.system"
 local grid = require "app.grid"
 local ControlPanel = require "gameObjects.ControlPanel"
 
@@ -136,8 +138,14 @@ function Viewer:openPath(path)
 end
 
 --- Asks for the OS file picker. The answer is collected in update(), so the
---- window keeps drawing while the dialog is open.
+--- window keeps drawing while the dialog is open. In a browser there is no
+--- picker to shell out to: the page shows its own, and the answer arrives
+--- through the inbox that update() polls either way.
 function Viewer:openDialog()
+  if system.isWeb() then
+    webBridge.requestPicker()
+    return
+  end
   if imageIO.requestOpenDialog("Open an image") then
     self.awaitingDialog = true
   end
@@ -160,12 +168,28 @@ function Viewer:filedropped(file)
 end
 
 --- Writes the processed image next to the source as a PNG, without ever
---- overwriting: a numeric suffix is added until the name is free.
+--- overwriting: a numeric suffix is added until the name is free. In a browser
+--- there is no "next to the source": the PNG goes to the page, which hands it
+--- to the browser to save wherever downloads go.
 function Viewer:export()
   if not self.pipeline:hasImage() then
     self:notify("nothing to export yet")
     return
   end
+
+  if system.isWeb() then
+    local webImageData = self:exportImageData()
+    if not webImageData then
+      self:notify("could not read the processed image back")
+      return
+    end
+    local stem = self.path and imageIO.stem(self.path) or "image"
+    local name = stem .. "-notan.png"
+    local saved, saveErr = webBridge.save(webImageData, name)
+    self:notify(saved and ("saved " .. name) or (saveErr or "could not save"))
+    return
+  end
+
   local dir = self.path and imageIO.dirname(self.path) or love.filesystem.getSaveDirectory()
   local stem = self.path and imageIO.stem(self.path) or "image"
   local target = dir .. "/" .. stem .. "-notan.png"
@@ -336,6 +360,11 @@ function Viewer:handleMouseDown(x, y, button, istouch, presses)
 end
 
 function Viewer:update(dt)
+  if system.isWeb() then
+    local incoming = webBridge.poll()
+    if incoming then self:openPath(incoming) end
+  end
+
   if self.awaitingDialog then
     local finished, path, err = imageIO.pollOpenDialog()
     if finished then
@@ -420,7 +449,8 @@ function Viewer:drawEmptyState(vw, vh)
   love.graphics.printf("Drop an image here", 0, vh / 2 - 24, vw, "center")
   love.graphics.setFont(small)
   love.graphics.setColor(1, 1, 1, 0.4)
-  love.graphics.printf("or press O to open one", 0, vh / 2 + 4, vw, "center")
+  love.graphics.printf(system.isWeb() and "or use Open image at the top of the page"
+    or "or press O to open one", 0, vh / 2 + 4, vw, "center")
   love.graphics.setColor(1, 1, 1, 1)
 end
 
