@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# Builds and publishes the game to itch.io. Fill in the variables below first.
+# Builds Notan and publishes it as a GitHub release. Fill in the variables below
+# first, and bump VERSION for each release (the tag must not already exist).
 #
-#   scripts/release.sh            # export assets, build all platforms, push with butler
-#   scripts/release.sh --no-push  # everything except the butler pushes
+#   scripts/release.sh            # export assets, build every platform, publish the release
+#   scripts/release.sh --no-push  # everything except the gh release
+#   VERSION=0.2.0 scripts/release.sh
 #
 # Steps: regenerate marketing art (love . --export-assets) -> .love via
 # love-release -> Mac .app and Windows .exe packaged from the official LÖVE
-# runtime with the generated icon baked in -> web build via love.js with a
-# favicon -> butler push per channel -> checklist of page images to upload
-# by hand (itch.io has no API for cover/screenshot images).
+# runtime with the generated icon baked in -> gh release create with all four
+# downloads attached. spookidev.com/notan links at /releases/latest/download/,
+# so the page needs no change when a release goes out.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -16,8 +18,9 @@ TITLE="Notan"
 PKG=notan
 UTI=com.spooki.notan
 AUTHOR="George Butter"
-ITCH=your-itch-username/notan
-ITCH_EDIT_URL="https://your-itch-username.itch.io/notan/edit"
+REPO=spooki-dev/notan
+# Bump for every release; the tag is v$VERSION and gh refuses an existing one.
+VERSION="${VERSION:-0.1.0}"
 LOVE=/Applications/love.app/Contents/MacOS/love
 export PATH="$(dirname "$LOVE"):$PATH"   # love-release shells out to `love`
 # love-release only supports LÖVE <= 11.3, so Mac/Windows packages are built
@@ -30,7 +33,7 @@ SHA=$(git rev-parse --short HEAD)
 PUSH=1
 [[ "${1:-}" == "--no-push" ]] && PUSH=0
 
-for tool in "$LOVE" iconutil sips plutil codesign zip unzip curl node npm love-release love.js butler perl; do
+for tool in "$LOVE" iconutil sips plutil codesign zip unzip curl node npm love-release gh; do
   command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }
 done
 
@@ -55,9 +58,10 @@ love-release -t "$TITLE" -a "$AUTHOR" --uti "$UTI" -p "$PKG" \
 LOVEFILE="$OUT/$TITLE.love"
 [[ -f "$LOVEFILE" ]] || { echo "love-release did not produce $LOVEFILE" >&2; exit 1; }
 
-step "Check shipped Lua parses under Lua 5.1 (love.js runtime)"
-# love.js runs PUC Lua 5.1, not LuaJIT. Check the exact files inside the .love
-# so the web build cannot ship something that only LuaJIT accepts (e.g. goto).
+step "Check shipped Lua parses under Lua 5.1"
+# The engine is kept inside the Lua 5.1 subset LuaJIT and PUC Lua share, which
+# .luarc.json and the pre-commit hook also enforce. Check the exact files
+# inside the .love, not the working tree.
 unzip -q "$LOVEFILE" -d "$WORK/lovecheck"
 (cd "$WORK/lovecheck" && "$OLDPWD/scripts/lint-lua51.sh" $(find . -name '*.lua' | sed 's|^\./||'))
 
@@ -115,49 +119,34 @@ for arch in 32 64; do
   (cd "$DIR" && zip -qr "$OLDPWD/$OUT/$TITLE-win$arch.zip" "$TITLE-win$arch")
 done
 
-step "Build web"
-love.js -c -t "$TITLE" "$LOVEFILE" "$OUT/web" >/dev/null
-# Swap the stock love.js page (heading, footer, "Powered by" text) for our bare
-# template in scripts/web/, keeping love.js's game.js/love.js/love.wasm/game.data.
-cp -R scripts/web/. "$OUT/web/"
-rm -f "$OUT/web/theme/bg.png"
-TITLE="$TITLE" perl -pi -e 's/\{\{TITLE\}\}/$ENV{TITLE}/g' "$OUT/web/index.html"
-cp "$GEN/favicon.png" "$OUT/web/theme/favicon.png"
-grep -q 'theme/favicon.png' "$OUT/web/index.html" || { echo "favicon link missing from web page" >&2; exit 1; }
-grep -q '{{' "$OUT/web/index.html" && { echo "unsubstituted placeholder in web page" >&2; exit 1; }
-
-# butler unpacks zip uploads, and a .love is a zip, so push it from a folder.
-mkdir -p "$OUT/love"
-cp "$LOVEFILE" "$OUT/love/"
-
 if [[ $PUSH -eq 1 ]]; then
-  step "Push to itch.io ($ITCH @ $SHA)"
-  butler push "$OUT/$TITLE-macos.zip" "${ITCH}:mac"        --userversion "$SHA"
-  butler push "$OUT/$TITLE-win64.zip" "${ITCH}:windows"    --userversion "$SHA"
-  butler push "$OUT/$TITLE-win32.zip" "${ITCH}:windows-32" --userversion "$SHA"
-  butler push "$OUT/web"              "${ITCH}:web"        --userversion "$SHA"
-  butler push "$OUT/love"             "${ITCH}:love"       --userversion "$SHA"
-  butler status "$ITCH"
+  step "Publish release v$VERSION to $REPO"
+  gh release create "v$VERSION" \
+    --repo "$REPO" \
+    --title "$TITLE $VERSION" \
+    --notes "Built from $SHA. The macOS app and Windows exes are unsigned: see the install notes at https://spookidev.com/notan#install." \
+    "$OUT/$TITLE-macos.zip#$TITLE for macOS" \
+    "$OUT/$TITLE-win64.zip#$TITLE for Windows (64-bit)" \
+    "$OUT/$TITLE-win32.zip#$TITLE for Windows (32-bit)" \
+    "$LOVEFILE#$TITLE.love (any OS with LÖVE $LOVE_RUNTIME_VERSION)"
+  gh release view "v$VERSION" --repo "$REPO" --web
 else
-  step "Skipping butler push (--no-push)"
+  step "Skipping the GitHub release (--no-push)"
 fi
 
 cat <<MSG
 
-Builds are in $OUT/. itch.io cannot receive page images via butler or its API,
-so upload these by hand on the edit page:
+Builds are in $OUT/.
 
-  $GEN/cover.png    630x500    Edit game -> Cover image
-  $GEN/wide.png     1920x1080  Edit theme -> Banner / background image
-  $GEN/social.png   1200x630   Devlogs and social posts
-  $GEN/logo.png     1600x400   Press kit / transparent banner
-  $GEN/icon.png     1024x1024  Store listings / press kit
-  assets/screenshots/*.png     Edit game -> Screenshots
+The download buttons on https://spookidev.com/notan point at
+https://github.com/$REPO/releases/latest/download/<file>, which GitHub
+redirects to the newest release, so the site needs no change when you ship.
 
-First release only: on the edit page tick "This file will be played in the
-browser" on the *web* channel upload (not the .love one, which has no
-index.html), set its viewport to 1280x720, and set the page kind to HTML.
+Marketing art, if you want it on the page or in a readme:
+
+  $GEN/cover.png    630x500
+  $GEN/wide.png     1920x1080
+  $GEN/social.png   1200x630
+  $GEN/logo.png     1600x400
+  $GEN/icon.png     1024x1024
 MSG
-if [[ $PUSH -eq 1 ]]; then
-  open "$ITCH_EDIT_URL" 2>/dev/null || echo "Edit page: $ITCH_EDIT_URL"
-fi
