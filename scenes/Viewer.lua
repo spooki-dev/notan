@@ -8,7 +8,9 @@ local Pipeline = require "effects.Pipeline"
 local effects = require "effects"
 local imageIO = require "app.imageIO"
 local webBridge = require "app.webBridge"
+local filePicker = require "engine.device.filePicker"
 local system = require "engine.utils.system"
+local pixelFormat = require "engine.utils.pixelFormat"
 local grid = require "app.grid"
 local ControlPanel = require "gameObjects.ControlPanel"
 
@@ -38,6 +40,8 @@ end
 --- directory, which is skipped along with any flags.
 ---@return string|nil
 local function pathFromArgs()
+  -- In a browser the only argument is the .love itself, which is not a photo.
+  if system.isWeb() then return nil end
   if type(arg) ~= "table" then return nil end
   for i = 1, #arg do
     local candidate = arg[i]
@@ -60,6 +64,7 @@ function Viewer:new()
 
   self.pipeline = Pipeline(effects)
   self.path = nil
+  self.imageName = nil
   self.sourceWidth, self.sourceHeight = 0, 0
 
   -- View transform: the image's top-left in screen pixels, plus a scale.
@@ -123,32 +128,68 @@ function Viewer:openPath(path)
     self:notify(err or "could not open that file")
     return false
   end
+  return self:adopt(imageData, imageIO.basename(path), path)
+end
+
+--- Takes a decoded image as the document, whatever brought it in: the command
+--- line, a drop, or the device picker. `path` is where it came from on disk
+--- and is nil when nothing can say -- a picked file on any platform, because
+--- the device API deals in bytes and a name, never a path. Export reads it to
+--- decide where the PNG goes, and copes with nil.
+---@param imageData love.ImageData
+---@param label string Name to show in the status bar
+---@param path string|nil Absolute path, when there is one
+---@return boolean ok
+function Viewer:adopt(imageData, label, path)
   self.sourceWidth, self.sourceHeight = imageData:getDimensions()
   self.pipeline:setImageData(imageData)
   self.path = path
+  self.imageName = label
   self.fitting = true
   self:fit()
   if self.pipeline.scaledDown then
-    self:notify(imageIO.basename(path) .. " opened, scaled to "
+    self:notify(label .. " opened, scaled to "
       .. self.pipeline.width .. "x" .. self.pipeline.height .. " for processing")
   else
-    self:notify(imageIO.basename(path) .. " opened")
+    self:notify(label .. " opened")
   end
   return true
 end
 
---- Asks for the OS file picker. The answer is collected in update(), so the
---- window keeps drawing while the dialog is open. In a browser there is no
---- picker to shell out to: the page shows its own, and the answer arrives
---- through the inbox that update() polls either way.
+--- Asks the device for its own file picker. The engine runs the dialog off the
+--- main thread on desktop and through the page in a browser, and calls back on
+--- a later frame, so the window keeps drawing throughout. On web the browser
+--- will not open a dialog except from a tap, so the request is armed rather
+--- than opened and the status bar says so (see `drawStatus`).
 function Viewer:openDialog()
-  if system.isWeb() then
-    webBridge.requestPicker()
+  if filePicker.isOpen() then return end
+  if not filePicker.isAvailable() then
+    -- In a browser the page can still raise its own picker, and whatever it
+    -- opens arrives through the inbox that update() polls anyway. Everywhere
+    -- else an unavailable picker really does mean there is none.
+    if system.isWeb() then
+      webBridge.requestPicker()
+      return
+    end
+    self:notify("this platform has no file picker; drag an image onto the window")
     return
   end
-  if imageIO.requestOpenDialog("Open an image") then
-    self.awaitingDialog = true
-  end
+
+  filePicker.open({ deliver = "bytes", accept = { "image/*" } }, function(result, event)
+    if event ~= "picked" then
+      -- "cancelled" is the player changing their mind, which needs no comment.
+      if event ~= "cancelled" then
+        self:notify("could not open that file")
+      end
+      return
+    end
+    local imageData, err = imageIO.decode(result.bytes, result.name)
+    if not imageData then
+      self:notify(err or "could not open that file")
+      return
+    end
+    self:adopt(imageData, result.name or "image", nil)
+  end)
 end
 
 --- Engine hook: a file was dragged onto the window.
@@ -159,12 +200,16 @@ function Viewer:filedropped(file)
     self:notify(err or "could not open that file")
     return
   end
-  self.sourceWidth, self.sourceHeight = imageData:getDimensions()
-  self.pipeline:setImageData(imageData)
-  self.path = path
-  self.fitting = true
-  self:fit()
-  self:notify((path and imageIO.basename(path) or "image") .. " opened")
+  self:adopt(imageData, path and imageIO.basename(path) or "image", path)
+end
+
+--- The exported file's name, without extension: the source file's name
+--- whatever brought it in, falling back to "image" before anything is open.
+---@return string
+function Viewer:exportStem()
+  if self.path then return imageIO.stem(self.path) end
+  if self.imageName then return imageIO.stem(self.imageName) end
+  return "image"
 end
 
 --- Writes the processed image next to the source as a PNG, without ever
@@ -178,20 +223,26 @@ function Viewer:export()
   end
 
   if system.isWeb() then
+    if not pixelFormat.encodable() then
+      self:notify("this browser cannot save a PNG; the desktop app can")
+      return
+    end
     local webImageData = self:exportImageData()
     if not webImageData then
       self:notify("could not read the processed image back")
       return
     end
-    local stem = self.path and imageIO.stem(self.path) or "image"
-    local name = stem .. "-notan.png"
+    local name = self:exportStem() .. "-notan.png"
     local saved, saveErr = webBridge.save(webImageData, name)
     self:notify(saved and ("saved " .. name) or (saveErr or "could not save"))
     return
   end
 
+  -- No path means a picked file, which the device API gives us by name only.
+  -- The study has to land somewhere, and the save directory is the one place
+  -- every platform lets us write.
   local dir = self.path and imageIO.dirname(self.path) or love.filesystem.getSaveDirectory()
-  local stem = self.path and imageIO.stem(self.path) or "image"
+  local stem = self:exportStem()
   local target = dir .. "/" .. stem .. "-notan.png"
   local n = 2
   while exists(target) do
@@ -217,12 +268,12 @@ function Viewer:exportImageData()
   local canvas = self.pipeline:getResult()
   if not canvas then return nil end
   if not self.pipeline:isEnabled("grid") then
-    return canvas:newImageData()
+    return pixelFormat.toImageData(canvas)
   end
 
   local w, h = self.pipeline.width, self.pipeline.height
   local values = self.pipeline:getState("grid").values
-  local target = love.graphics.newCanvas(w, h)
+  local target = pixelFormat.newCanvas(w, h)
   love.graphics.push("all")
   love.graphics.setCanvas(target)
   love.graphics.clear(0, 0, 0, 0)
@@ -233,7 +284,7 @@ function Viewer:exportImageData()
   grid.draw(0, 0, w, h, values.columns, values.rows, grid.thicknessFor(w, h))
   love.graphics.setCanvas()
   love.graphics.pop()
-  return target:newImageData()
+  return pixelFormat.toImageData(target)
 end
 
 -- View ----------------------------------------------------------------------
@@ -337,43 +388,36 @@ function Viewer:onActionPressed(name)
   end
 end
 
---- Wheel: zoom about the cursor while it is over the image.
+--- Wheel: zoom about the cursor while it is over the image. The panel is asked
+--- rather than measured off the viewport, because a panel floating over a
+--- narrow window is inside the image's own area and still owns its scroll.
 ---@param dx number
 ---@param dy number
 function Viewer:handleScroll(dx, dy)
   Viewer.super.handleScroll(self, dx, dy)
   if dy == 0 then return end
   local mx, my = love.mouse.getPosition()
-  local vw = select(1, self:viewport())
-  if mx > vw then return end
+  if self.panel:containsPoint(mx, my) then return end
   self:zoomAt(ZOOM_PER_NOTCH ^ dy, mx, my)
 end
 
 --- A press over the image area starts a pan; the panel handles its own.
 function Viewer:handleMouseDown(x, y, button, istouch, presses)
   Viewer.super.handleMouseDown(self, x, y, button, istouch, presses)
-  local vw = select(1, self:viewport())
-  if button == 1 and x <= vw and self.pipeline:hasImage() then
+  if button == 1 and not self.panel:containsPoint(x, y) and self.pipeline:hasImage() then
     self.panning = true
     self.panX, self.panY = x, y
   end
 end
 
 function Viewer:update(dt)
+  -- A photo the page started: its Open button, a drop on the page, a paste.
+  -- None of those are answers to a request the app made, so they arrive
+  -- through the inbox rather than the device picker (see app/webBridge.lua).
   if system.isWeb() then
     local incoming = webBridge.poll()
-    if incoming then self:openPath(incoming) end
-  end
-
-  if self.awaitingDialog then
-    local finished, path, err = imageIO.pollOpenDialog()
-    if finished then
-      self.awaitingDialog = false
-      if path then
-        self:openPath(path)
-      elseif err then
-        self:notify("file picker failed: " .. err)
-      end
+    if incoming then
+      self:openPath(incoming)
     end
   end
 
@@ -461,23 +505,35 @@ function Viewer:drawStatus(vw, vh, showOriginal)
   local small = cacheManager.getFont("small")
   love.graphics.setFont(small)
   local left = self.message
+  if not left and filePicker.getState() == "awaitingGesture" then
+    -- Browsers open a dialog only from a real tap, so the engine arms the
+    -- request and the page puts up its own prompt. Say so rather than look idle.
+    left = "waiting for you to confirm the file picker"
+  end
   if not left then
-    left = (self.path and imageIO.basename(self.path) or "image")
+    left = (self.imageName or "image")
       .. "  " .. self.sourceWidth .. "x" .. self.sourceHeight
       .. "  " .. string.format("%d%%", math.floor(self.zoom * 100 + 0.5))
     if showOriginal then
       left = left .. "  (original)"
     end
   end
+  local baseline = vh - 24 + (24 - small:getHeight()) / 2
   love.graphics.setColor(0, 0, 0, 0.55)
   love.graphics.rectangle("fill", 0, vh - 24, vw, 24)
   love.graphics.setColor(1, 1, 1, self.message and 1 or 0.6)
-  love.graphics.print(left, 10, vh - 24 + (24 - small:getHeight()) / 2)
+  love.graphics.print(left, 10, baseline)
 
+  -- The key list is the first thing to go when the window gets tight: it
+  -- would run into the file name long before it ran out of window, and the
+  -- narrow sizes are phones, which have no keyboard for it to describe.
   local hint = "O open   E export   TAB original   0 fit   1 100%   G grid   R reset   H "
     .. (self.panel.visible and "hide panel" or "show panel")
-  love.graphics.setColor(1, 1, 1, 0.3)
-  love.graphics.print(hint, vw - small:getWidth(hint) - 10, vh - 24 + (24 - small:getHeight()) / 2)
+  local hintWidth = small:getWidth(hint)
+  if small:getWidth(left) + hintWidth + 30 <= vw then
+    love.graphics.setColor(1, 1, 1, 0.3)
+    love.graphics.print(hint, vw - hintWidth - 10, baseline)
+  end
   love.graphics.setColor(1, 1, 1, 1)
 end
 

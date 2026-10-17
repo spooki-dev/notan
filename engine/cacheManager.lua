@@ -9,6 +9,9 @@
 ---@field music table<string, love.Source>
 ---@field fonts table<string, love.Font>
 ---@field preloadImage fun(key: string, path: string): nil
+---@field addImage fun(key: string, image: love.Image): nil
+---@field replaceImage fun(key: string, image: love.Image): nil
+---@field hasImage fun(key: string): boolean
 ---@field getImage fun(key: string): love.Image
 ---@field preloadSpritesheet fun(key: string, path: string, width: number, height: number, keys: table<string>): nil
 ---@field getSpritesheet fun(key: string): Spritesheet
@@ -37,6 +40,38 @@ function cacheManager.preloadImage(key, path)
   else
     error("Image already preloaded: " .. key)
   end
+end
+
+--- Registers an already-built Image (for example one the player imported
+--- through engine/device/filePicker.lua, or a camera still) under a key.
+--- @param key string Cache key
+--- @param image love.Image The Image to cache
+function cacheManager.addImage(key, image)
+  if not images[key] then
+    images[key] = image
+  else
+    error("Image already preloaded: " .. key)
+  end
+end
+
+--- Swaps the Image behind a key, releasing the one it replaces. Unlike
+--- addImage this is allowed to overwrite: imported images arrive again and
+--- again under the same key, which the preload path deliberately refuses.
+--- @param key string Cache key
+--- @param image love.Image The Image to cache
+function cacheManager.replaceImage(key, image)
+  local previous = images[key]
+  images[key] = image
+  if previous and previous ~= image then
+    previous:release()
+  end
+end
+
+--- Whether an image is cached under a key
+--- @param key string Cache key
+--- @return boolean
+function cacheManager.hasImage(key)
+  return images[key] ~= nil
 end
 
 function cacheManager.getImage(key)

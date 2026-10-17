@@ -199,10 +199,44 @@ function Controls:load()
       }, { display = "flex", flexDirection = "row", gap = 10, height = 32, margin = Vector4(10, 0, 0, 0) }),
     }, { padding = Vector4(0, 0, 0, 0) }),
   }, { width = w, height = h, padding = Vector4(24, 40, 24, 40) }))
+  self.builtWidth, self.builtHeight = w, h
+end
+
+--- Builds the screen again at the current window size.
+---
+--- The engine's UI boxes resolve their percentage widths when they load and
+--- then keep the number, so a laid-out screen belongs to the window it was
+--- laid out in. Rebuilding is the only way to fit a different one, and at a
+--- few dozen boxes it is cheap enough to be the whole answer -- better than a
+--- second layout path that only runs on resize and so is only half tested.
+--- The focused cell survives because `load` rebuilds the rows in the same
+--- order, so the index still names the same binding.
+function Controls:relayout()
+  local canvas = self:getGameObject("ControlsUI")
+  if not canvas then return end
+  local focused = self.focus.index
+  self:removeGameObjectTree(canvas)
+  self:load()
+  if focused > 0 then
+    self.focus:setFocus(focused)
+  end
+end
+
+--- Engine hook: the window changed size while this screen was in front.
+---@param w number
+---@param h number
+function Controls:resize(w, h)
+  self:relayout()
 end
 
 function Controls:start()
   self.capturing = nil
+  -- Only the current scene is told about a resize, so a window that changed
+  -- size while the Viewer was up is news to this screen on the way in.
+  local w, h = love.graphics.getDimensions()
+  if w ~= self.builtWidth or h ~= self.builtHeight then
+    self:relayout()
+  end
   if not self.focus:getFocused() then
     self.focus:setFocus(1)
   end

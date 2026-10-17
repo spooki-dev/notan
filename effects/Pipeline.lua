@@ -1,4 +1,5 @@
 local Object = require "engine.lib.classic"
+local pixelFormat = require "engine.utils.pixelFormat"
 
 --- Longest edge of the working image. Photos straight off a camera are far
 --- bigger than any texture we need for judging values, and every effect pass
@@ -81,8 +82,8 @@ function Pipeline:setImageData(imageData)
   source:setFilter("linear", "linear")
   self.source = source
 
-  self.canvasA = love.graphics.newCanvas(self.width, self.height)
-  self.canvasB = love.graphics.newCanvas(self.width, self.height)
+  self.canvasA = pixelFormat.newCanvas(self.width, self.height)
+  self.canvasB = pixelFormat.newCanvas(self.width, self.height)
   self.canvasA:setFilter("linear", "linear")
   self.canvasB:setFilter("linear", "linear")
   self.result = nil
@@ -215,7 +216,7 @@ end
 function Pipeline:toImageData()
   local canvas = self:getResult()
   if not canvas then return nil end
-  return canvas:newImageData()
+  return pixelFormat.toImageData(canvas)
 end
 
 return Pipeline
