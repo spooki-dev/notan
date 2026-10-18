@@ -402,11 +402,19 @@ function Viewer:handleScroll(dx, dy)
 end
 
 --- A press over the image area starts a pan; the panel handles its own.
+---
+--- Before anything is open that same area is the drop target, and pressing it
+--- opens the picker instead. A touch screen has neither of the other two ways
+--- in -- nothing to drag a file from, no keyboard to press O on -- so the
+--- target that says "drop an image here" has to answer a tap as well.
 function Viewer:handleMouseDown(x, y, button, istouch, presses)
   Viewer.super.handleMouseDown(self, x, y, button, istouch, presses)
-  if button == 1 and not self.panel:containsPoint(x, y) and self.pipeline:hasImage() then
+  if button ~= 1 or self.panel:containsPoint(x, y) then return end
+  if self.pipeline:hasImage() then
     self.panning = true
     self.panX, self.panY = x, y
+  else
+    self:openDialog()
   end
 end
 
@@ -488,13 +496,19 @@ end
 function Viewer:drawEmptyState(vw, vh)
   local body = cacheManager.getFont("body")
   local small = cacheManager.getFont("small")
+  -- A floating panel covers the right of the image area. The invitation is the
+  -- one thing that must be read before anything else can happen, so it centres
+  -- in what is left rather than behind the panel.
+  local free = vw - self.panel:overlappedWidth()
   love.graphics.setFont(body)
   love.graphics.setColor(1, 1, 1, 0.75)
-  love.graphics.printf("Drop an image here", 0, vh / 2 - 24, vw, "center")
+  love.graphics.printf("Drop an image here", 0, vh / 2 - 24, free, "center")
   love.graphics.setFont(small)
   love.graphics.setColor(1, 1, 1, 0.4)
-  love.graphics.printf(system.isWeb() and "or use Open image at the top of the page"
-    or "or press O to open one", 0, vh / 2 + 4, vw, "center")
+  -- The narrow layout is the phone one, where there is no key to offer and
+  -- tapping is the whole of it.
+  love.graphics.printf(self.panel.overlay and "or tap here to choose one"
+    or "or click here to choose one, or press O", 0, vh / 2 + 4, free, "center")
   love.graphics.setColor(1, 1, 1, 1)
 end
 

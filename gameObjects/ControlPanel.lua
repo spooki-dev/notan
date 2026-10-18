@@ -135,6 +135,16 @@ function ControlPanel:occupiedWidth()
   return self.panelWidth
 end
 
+--- Width the panel floats over: room the image area still counts as its own
+--- but cannot show anything in, the tab included, since that sits outside the
+--- panel body. Zero unless the panel is floating. The scene keeps its own
+--- prompts out of this strip.
+---@return number
+function ControlPanel:overlappedWidth()
+  if not self.overlay then return 0 end
+  return (self.visible and self.panelWidth or 0) + HANDLE_W
+end
+
 --- Shows or hides the panel.
 function ControlPanel:toggleVisible()
   self.visible = not self.visible
