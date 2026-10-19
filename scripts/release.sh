@@ -13,6 +13,7 @@
 # so the page needs no change when a release goes out.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+ROOT="$PWD"
 
 TITLE="Notan"
 PKG=notan
@@ -31,6 +32,68 @@ GEN=assets/generated
 SHA=$(git rev-parse --short HEAD)
 PUSH=1
 [[ "${1:-}" == "--no-push" ]] && PUSH=0
+
+# Code signing. All three are empty by default, and an unset one means the
+# step is skipped: the build still works, it just arrives as an unidentified
+# developer. docs/code-signing.md covers what each one costs to obtain.
+#
+#   MACOS_SIGN_IDENTITY   "Developer ID Application: Name (TEAMID)"
+#   MACOS_NOTARY_PROFILE  a profile from `xcrun notarytool store-credentials`
+#   WINDOWS_SIGN_HOOK     an executable taking one path, signing it in place
+MACOS_SIGN_IDENTITY="${MACOS_SIGN_IDENTITY:-}"
+MACOS_NOTARY_PROFILE="${MACOS_NOTARY_PROFILE:-}"
+WINDOWS_SIGN_HOOK="${WINDOWS_SIGN_HOOK:-}"
+ENTITLEMENTS=scripts/macos-entitlements.plist
+
+# Signs an .app for Developer ID, or ad-hoc when no identity is configured.
+# Nested Mach-O code is signed first: `--deep` is deprecated, and it does not
+# apply the entitlements the hardened runtime needs anyway.
+sign_macos_app() {
+  local app=$1
+  if [[ -z "$MACOS_SIGN_IDENTITY" ]]; then
+    codesign --force --deep --sign - "$app" 2>/dev/null \
+      || echo "warning: ad-hoc codesign failed" >&2
+    return 0
+  fi
+  [[ -f "$ENTITLEMENTS" ]] || { echo "missing $ENTITLEMENTS" >&2; exit 1; }
+  local inner
+  while IFS= read -r inner; do
+    codesign --force --timestamp --options runtime \
+      --sign "$MACOS_SIGN_IDENTITY" "$inner"
+  done < <(find "$app/Contents" -type f \( -name '*.dylib' -o -name '*.so' \) 2>/dev/null)
+  while IFS= read -r inner; do
+    codesign --force --timestamp --options runtime \
+      --sign "$MACOS_SIGN_IDENTITY" "$inner"
+  done < <(find "$app/Contents/Frameworks" -maxdepth 1 -name '*.framework' 2>/dev/null)
+  codesign --force --timestamp --options runtime \
+    --entitlements "$ENTITLEMENTS" --sign "$MACOS_SIGN_IDENTITY" "$app"
+  codesign --verify --strict --verbose=2 "$app"
+}
+
+# Submits to Apple and staples the ticket, so a first launch works offline.
+# Notarization takes an archive, but the ticket staples to the bundle, not to
+# a zip, so the archive is rebuilt around the stapled app afterwards.
+notarize_macos() {
+  local app=$1 archive=$2
+  [[ -n "$MACOS_NOTARY_PROFILE" ]] || return 0
+  [[ -n "$MACOS_SIGN_IDENTITY" ]] || { echo "MACOS_NOTARY_PROFILE needs MACOS_SIGN_IDENTITY: Apple only notarizes Developer ID builds" >&2; exit 1; }
+  step "Notarize $(basename "$archive")"
+  xcrun notarytool submit "$archive" --keychain-profile "$MACOS_NOTARY_PROFILE" --wait
+  xcrun stapler staple "$app"
+  rm -f "$archive"
+  (cd "$(dirname "$app")" && zip -qry "$ROOT/$archive" "$(basename "$app")")
+  xcrun stapler validate "$app"
+}
+
+# Authenticode, through whatever tooling the certificate needs. Every CA and
+# cloud signing service drives this differently, so the script only knows the
+# shape: one executable, one path, signed in place.
+sign_windows() {
+  local target=$1
+  [[ -n "$WINDOWS_SIGN_HOOK" ]] || return 0
+  [[ -x "$WINDOWS_SIGN_HOOK" ]] || { echo "WINDOWS_SIGN_HOOK is not executable: $WINDOWS_SIGN_HOOK" >&2; exit 1; }
+  "$WINDOWS_SIGN_HOOK" "$target"
+}
 
 for tool in "$LOVE" iconutil sips plutil codesign zip unzip curl node npm gh; do
   command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }
@@ -101,8 +164,9 @@ plutil -replace CFBundleDisplayName -string "$TITLE" "$PLIST" 2>/dev/null || tru
 # With CFBundleIconName present macOS reads the icon from Assets.car, not the .icns.
 plutil -remove CFBundleIconName "$PLIST" 2>/dev/null || true
 plutil -remove UTExportedTypeDeclarations "$PLIST" 2>/dev/null || true
-codesign --force --deep --sign - "$APP" 2>/dev/null || echo "warning: ad-hoc codesign failed" >&2
-(cd "$WORK/mac" && zip -qry "$OLDPWD/$OUT/$TITLE-macos.zip" "$TITLE.app")
+sign_macos_app "$APP"
+(cd "$WORK/mac" && zip -qry "$ROOT/$OUT/$TITLE-macos.zip" "$TITLE.app")
+notarize_macos "$APP" "$OUT/$TITLE-macos.zip"
 
 step "Package Windows exes"
 (cd scripts && npm install --silent --no-audit --no-fund)
@@ -120,16 +184,25 @@ for arch in 32 64; do
   # directory record, which is how LÖVE finds a fused game.
   cat "$DIR/love-icon.exe" "$LOVEFILE" > "$SRC/$PKG.exe"
   rm -f "$SRC/love.exe" "$SRC/lovec.exe" "$SRC/readme.txt" "$SRC/changes.txt" "$SRC/love.ico" "$SRC/game.ico"
+  # Sign after the .love is appended: anything added to the file afterwards
+  # falls outside the signature and invalidates it.
+  sign_windows "$SRC/$PKG.exe"
   mv "$SRC" "$DIR/$TITLE-win$arch"
   (cd "$DIR" && zip -qr "$OLDPWD/$OUT/$TITLE-win$arch.zip" "$TITLE-win$arch")
 done
+
+if [[ -n "$MACOS_SIGN_IDENTITY" ]]; then
+  RELEASE_NOTES="Built from $SHA."
+else
+  RELEASE_NOTES="Built from $SHA. The macOS app and Windows exes are unsigned: see the install notes at https://spookidev.com/notan#install."
+fi
 
 if [[ $PUSH -eq 1 ]]; then
   step "Publish release v$VERSION to $REPO"
   gh release create "v$VERSION" \
     --repo "$REPO" \
     --title "$TITLE $VERSION" \
-    --notes "Built from $SHA. The macOS app and Windows exes are unsigned: see the install notes at https://spookidev.com/notan#install." \
+    --notes "$RELEASE_NOTES" \
     "$OUT/$TITLE-macos.zip#$TITLE for macOS" \
     "$OUT/$TITLE-win64.zip#$TITLE for Windows (64-bit)" \
     "$OUT/$TITLE-win32.zip#$TITLE for Windows (32-bit)" \
@@ -139,9 +212,17 @@ else
   step "Skipping the GitHub release (--no-push)"
 fi
 
+signing_state() {
+  [[ -n "$MACOS_SIGN_IDENTITY" ]] || { echo "ad-hoc (unidentified developer)"; return; }
+  [[ -n "$MACOS_NOTARY_PROFILE" ]] && echo "Developer ID, notarized" || echo "Developer ID, NOT notarized"
+}
+
 cat <<MSG
 
 Builds are in $OUT/.
+
+Signing: macOS $(signing_state); Windows $([[ -n "$WINDOWS_SIGN_HOOK" ]] && echo "signed via $WINDOWS_SIGN_HOOK" || echo "unsigned").
+See docs/code-signing.md to change that.
 
 The download buttons on https://spookidev.com/notan point at
 https://github.com/$REPO/releases/latest/download/<file>, which GitHub

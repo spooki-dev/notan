@@ -117,7 +117,7 @@ scripts/check-requires.sh some/dir    # ...or against an unpacked .love
 - Mac and Windows packages are assembled from the official 11.5 runtime zips rather than by a packaging tool, so the shipped runtime is exactly the version the game targets.
 - The Windows icon is replaced inside the PE resource table by `scripts/patch-win-icon.mjs` (`node scripts/patch-win-icon.mjs <in.exe> <out.exe> <png> [<png>...]`), pure JavaScript via `pe-library` and `resedit`, so no Windows tooling is needed on macOS. The `.love` is then appended to the exe, which is how LÖVE finds a fused game.
 - The Mac icon is an `.icns` built with `iconutil`. With `CFBundleIconName` present macOS reads the icon from `Assets.car`, so the script removes that key.
-- Signing is ad-hoc; a failure prints a warning and continues.
+- Signing is ad-hoc by default; a failure prints a warning and continues. Set `MACOS_SIGN_IDENTITY`, `MACOS_NOTARY_PROFILE` and `WINDOWS_SIGN_HOOK` to sign for real — see `code-signing.md`.
 
 ## The web page
 

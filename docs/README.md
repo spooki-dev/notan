@@ -22,5 +22,6 @@ These pages are published at https://spookidev.com/spooki-love/docs. The site pu
 | 6 | `engine.md` | `Game` config, engine modules, contracts, state and saves |
 | 7 | `assets.md` | Preloading, fonts, cursors, audio, marketing art export |
 | 8 | `build-and-release.md` | Lua 5.1 rules, `release.sh`, itch.io checklist |
-| 9 | `development.md` | Hot reload, MCP bridge, debugging, conventions |
-| 10 | `examples.md` | The examples catalogue: running, testing, adding an example |
+| 9 | `code-signing.md` | Apple Developer ID and notarization, Windows Authenticode, the signing hooks in `release.sh` |
+| 10 | `development.md` | Hot reload, MCP bridge, debugging, conventions |
+| 11 | `examples.md` | The examples catalogue: running, testing, adding an example |

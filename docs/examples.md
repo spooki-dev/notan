@@ -1,7 +1,7 @@
 ---
 title: Examples
 description: The runnable examples catalogue, how to run and test it, and how to add an example.
-order: 10
+order: 11
 ---
 
 The `examples/` directory holds small scenes that each show one part of the engine, browsable at [/spooki-love/examples](/spooki-love/examples) where every example runs in the browser next to its source. The same files are the engine's regression suite: each runs with a fixed timestep, scripted input, its own assertions and a golden screenshot, so a change under `engine/` that breaks behaviour fails `scripts/test.sh`.

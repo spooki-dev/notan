@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Entitlements for the hardened runtime, which Developer ID signing needs and
+  notarization refuses to work without.
+
+  LÖVE 11.5 on desktop runs LuaJIT, which compiles Lua to machine code at
+  runtime and executes it. The hardened runtime forbids exactly that unless
+  the app asks for it, so without these two keys a correctly signed and
+  notarized build dies the first time a hot path gets compiled. That crash
+  never appears in an unsigned local build.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+</dict>
+</plist>

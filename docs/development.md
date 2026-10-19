@@ -1,7 +1,7 @@
 ---
 title: Development
 description: The day-to-day loop of running the game, hot reloading, debugging with the MCP bridge and VSCode, and the conventions the code follows.
-order: 9
+order: 10
 ---
 
 There is no build step and no package manager. `scripts/test.sh` runs the examples regression suite (see `examples.md`); visual changes you still verify by running the game and looking at it. Dev mode (`env = "dev"` in `main.lua`) adds hot reload on save and a TCP bridge that lets external tooling inspect and drive the running game. This page covers that loop, the editor setup and the conventions that keep the code base consistent.
