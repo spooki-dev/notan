@@ -143,6 +143,10 @@ function Game:initializeEvents()
     self:keyreleased(key, scancode)
   end
 
+  function love.textinput(text)
+    self:textinput(text)
+  end
+
   function love.gamepadpressed(joystick, button)
     self:gamepadpressed(joystick, button)
   end
@@ -438,6 +442,13 @@ end
 function Game:keyreleased(key, scancode)
   inputMap.keyreleased(key, scancode)
   self.sceneManager.keyreleased(key, scancode)
+end
+
+--- Typed text. Not routed through inputMap: bindings are commands, this is
+--- someone filling in a field, and the two must not fight over the same keys.
+--- @param text string The typed text, in UTF-8
+function Game:textinput(text)
+  self.sceneManager.textinput(text)
 end
 
 function Game:gamepadpressed(joystick, button)

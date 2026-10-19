@@ -12,6 +12,8 @@ local filePicker = require "engine.device.filePicker"
 local system = require "engine.utils.system"
 local pixelFormat = require "engine.utils.pixelFormat"
 local grid = require "app.grid"
+local cropOverlay = require "app.cropOverlay"
+local CropState = require "app.CropState"
 local ControlPanel = require "gameObjects.ControlPanel"
 
 --- The whole app: an image on the left, its effect stack on the right.
@@ -63,6 +65,7 @@ function Viewer:new()
   self.backgroundColor = { 0.09, 0.09, 0.1 }
 
   self.pipeline = Pipeline(effects)
+  self.crop = CropState()
   self.path = nil
   self.imageName = nil
   self.sourceWidth, self.sourceHeight = 0, 0
@@ -76,6 +79,8 @@ function Viewer:new()
 
   self.panning = false
   self.panX, self.panY = 0, 0
+  self.cropDrag = nil
+  self.cropActive = false
   self.message = nil
   self.messageTimer = 0
 end
@@ -84,7 +89,7 @@ function Viewer:load()
   saveManager.configure({ filename = "notan.lua", version = 1 })
   self.pipeline:load()
 
-  self.panel = ControlPanel("EffectPanel", self.pipeline)
+  self.panel = ControlPanel("EffectPanel", { self.pipeline, self.crop })
   self:addGameObject(self.panel)
 
   self:restoreSettings()
@@ -143,6 +148,9 @@ end
 function Viewer:adopt(imageData, label, path)
   self.sourceWidth, self.sourceHeight = imageData:getDimensions()
   self.pipeline:setImageData(imageData)
+  -- The box belongs to the photo, not to the painter, so a new photo always
+  -- gets a fresh one centred on it. The dimensions behind it are kept.
+  self.crop:setImageSize(self.pipeline.width, self.pipeline.height)
   self.path = path
   self.imageName = label
   self.fitting = true
@@ -259,29 +267,45 @@ function Viewer:export()
   self:notify(ok and ("saved " .. imageIO.basename(target)) or (err or "could not save"))
 end
 
---- The processed image as ImageData, with the grid drawn into it when it is
---- switched on. The grid is a screen-space overlay in the window, so for the
---- file it is redrawn at image scale: an exported reference with no grid on it
---- would be the one thing the panel showed that the PNG did not.
+--- The processed image as ImageData: the crop when there is one, with the
+--- grid drawn into it when it is switched on.
+---
+--- The grid is a screen-space overlay in the window, so for the file it is
+--- redrawn at image scale: an exported reference with no grid on it would be
+--- the one thing the panel showed that the PNG did not. The crop box itself
+--- is never drawn in -- the file *is* the box, and drawing its outline would
+--- be painting the frame onto the picture.
 ---@return love.ImageData|nil
 function Viewer:exportImageData()
   local canvas = self.pipeline:getResult()
   if not canvas then return nil end
-  if not self.pipeline:isEnabled("grid") then
+  local rect = self.crop:getRect()
+  local gridded = self.pipeline:isEnabled("grid")
+  -- Nothing to compose: hand back the chain's own canvas untouched.
+  if not gridded and not rect then
     return pixelFormat.toImageData(canvas)
   end
 
+  local ox, oy = 0, 0
   local w, h = self.pipeline.width, self.pipeline.height
-  local values = self.pipeline:getState("grid").values
+  if rect then
+    ox, oy, w, h = rect.x, rect.y, rect.w, rect.h
+  end
+
   local target = pixelFormat.newCanvas(w, h)
   love.graphics.push("all")
   love.graphics.setCanvas(target)
   love.graphics.clear(0, 0, 0, 0)
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.setBlendMode("replace")
-  love.graphics.draw(canvas, 0, 0)
+  love.graphics.draw(canvas, -ox, -oy)
   love.graphics.setBlendMode("alpha")
-  grid.draw(0, 0, w, h, values.columns, values.rows, grid.thicknessFor(w, h))
+  if gridded then
+    -- Over the crop, not the photo: the grid is for transferring proportions
+    -- onto the panel, and the panel is what the crop describes.
+    local values = self.pipeline:getState("grid").values
+    grid.draw(0, 0, w, h, values.columns, values.rows, grid.thicknessFor(w, h))
+  end
   love.graphics.setCanvas()
   love.graphics.pop()
   return pixelFormat.toImageData(target)
@@ -289,12 +313,28 @@ end
 
 -- View ----------------------------------------------------------------------
 
---- Scales the image to sit inside the viewport with a small margin.
+--- The rectangle the view frames: the crop when there is one, the whole
+--- working image otherwise. Once a crop is set it is what you are going to
+--- paint, so it is what fitting should fill the window with.
+---
+--- Four numbers rather than a table because fit and centre ask on every
+--- window resize.
+---@return number x Left edge in working-image pixels
+---@return number y Top edge in working-image pixels
+---@return number w Width in working-image pixels
+---@return number h Height in working-image pixels
+function Viewer:documentRect()
+  local rect = self.crop:getRect()
+  if rect then return rect.x, rect.y, rect.w, rect.h end
+  return 0, 0, self.pipeline.width, self.pipeline.height
+end
+
+--- Scales the framed rectangle to sit inside the viewport with a small margin.
 function Viewer:fit()
   if not self.pipeline:hasImage() then return end
   local vw, vh = self:viewport()
-  local iw, ih = self.pipeline.width, self.pipeline.height
-  self.zoom = math.min(vw / iw, vh / ih) * FIT_MARGIN
+  local _, _, rw, rh = self:documentRect()
+  self.zoom = math.min(vw / rw, vh / rh) * FIT_MARGIN
   self.fitting = true
   self:centre()
 end
@@ -307,11 +347,14 @@ function Viewer:actualSize()
   self:centre()
 end
 
---- Centres the image in the viewport at the current zoom.
+--- Centres the framed rectangle in the viewport at the current zoom. The
+--- offset is still the image's top-left, so the crop's own position inside
+--- the image is subtracted back out.
 function Viewer:centre()
   local vw, vh = self:viewport()
-  self.offsetX = (vw - self.pipeline.width * self.zoom) / 2
-  self.offsetY = (vh - self.pipeline.height * self.zoom) / 2
+  local rx, ry, rw, rh = self:documentRect()
+  self.offsetX = (vw - rw * self.zoom) / 2 - rx * self.zoom
+  self.offsetY = (vh - rh * self.zoom) / 2 - ry * self.zoom
 end
 
 --- Re-fits only while the view has not been moved by hand.
@@ -366,6 +409,9 @@ end
 
 ---@param name string
 function Viewer:onActionPressed(name)
+  -- While a panel field is open for typing its keys are digits and letters,
+  -- not commands: O is an O, 0 is a zero, and neither opens anything.
+  if self.panel:isEditing() then return end
   if name == "open_image" then
     self:openDialog()
   elseif name == "export_image" then
@@ -376,6 +422,10 @@ function Viewer:onActionPressed(name)
     self:actualSize()
   elseif name == "toggle_panel" then
     self:togglePanel()
+  elseif name == "toggle_crop" then
+    local on = not self.crop:isEnabled("crop")
+    self.crop:setEnabled("crop", on)
+    self:notify(on and ("crop " .. self.crop:summary()) or "crop off")
   elseif name == "toggle_grid" then
     local on = not self.pipeline:isEnabled("grid")
     self.pipeline:setEnabled("grid", on)
@@ -410,12 +460,55 @@ end
 function Viewer:handleMouseDown(x, y, button, istouch, presses)
   Viewer.super.handleMouseDown(self, x, y, button, istouch, presses)
   if button ~= 1 or self.panel:containsPoint(x, y) then return end
-  if self.pipeline:hasImage() then
-    self.panning = true
-    self.panX, self.panY = x, y
-  else
+  -- A press on the photo is a press out of the panel, which finishes
+  -- whatever was being typed there.
+  self.panel:commitEdit()
+  if not self.pipeline:hasImage() then
     self:openDialog()
+    return
   end
+  if self:startCropDrag(x, y) then return end
+  self.panning = true
+  self.panX, self.panY = x, y
+end
+
+--- Begins a crop gesture if the press landed on the box or one of its
+--- corners, and says whether it did so the caller can fall through to panning.
+---
+--- Corners are tested first and with a radius wider than the handle is drawn:
+--- a fingertip is broader than a cursor, and snatching the whole view when
+--- you meant to pull a corner is a jarring thing to do by accident.
+---@param x number Screen x
+---@param y number Screen y
+---@return boolean started
+function Viewer:startCropDrag(x, y)
+  local rect = self.crop:getRect()
+  if not rect then return false end
+  local boxX = self.offsetX + rect.x * self.zoom
+  local boxY = self.offsetY + rect.y * self.zoom
+  local boxW, boxH = rect.w * self.zoom, rect.h * self.zoom
+
+  local handle = cropOverlay.handleAt(boxX, boxY, boxW, boxH, x, y)
+  if handle then
+    self.cropDrag = {
+      mode = "resize",
+      handle = handle,
+      startRect = { x = rect.x, y = rect.y, w = rect.w, h = rect.h },
+    }
+    return true
+  end
+
+  if x >= boxX and x < boxX + boxW and y >= boxY and y < boxY + boxH then
+    self.cropDrag = {
+      mode = "move",
+      startRect = { x = rect.x, y = rect.y, w = rect.w, h = rect.h },
+      startX = (x - self.offsetX) / self.zoom,
+      startY = (y - self.offsetY) / self.zoom,
+    }
+    return true
+  end
+
+  return false
 end
 
 function Viewer:update(dt)
@@ -432,6 +525,34 @@ function Viewer:update(dt)
   if self.messageTimer > 0 then
     self.messageTimer = self.messageTimer - dt
     if self.messageTimer <= 0 then self.message = nil end
+  end
+
+  -- The crop can be switched on from the panel as well as from the keyboard,
+  -- so the refit watches the flag rather than hanging off either path.
+  local cropActive = self.crop:isActive()
+  if cropActive ~= self.cropActive then
+    self.cropActive = cropActive
+    self:refitIfNeeded()
+  end
+
+  -- The crop box is dragged by polling too, and for the same reason as the
+  -- pan below. Note what it does not do: a box drag never clears `fitting`,
+  -- because moving the frame is not moving the view.
+  if self.cropDrag then
+    if love.mouse.isDown(1) then
+      local mx, my = love.mouse.getPosition()
+      local imageX = (mx - self.offsetX) / self.zoom
+      local imageY = (my - self.offsetY) / self.zoom
+      if self.cropDrag.mode == "resize" then
+        self.crop:resizeFrom(self.cropDrag.handle, self.cropDrag.startRect, imageX, imageY)
+      else
+        local start = self.cropDrag.startRect
+        self.crop:moveTo(start.x + (imageX - self.cropDrag.startX),
+          start.y + (imageY - self.cropDrag.startY))
+      end
+    else
+      self.cropDrag = nil
+    end
   end
 
   -- Panning is polled rather than event-driven for the same reason the
@@ -464,7 +585,9 @@ function Viewer:draw()
 
   -- Showing the original means skipping the chain entirely, so the comparison
   -- is against the untouched source rather than a "no effects" render of it.
-  local showOriginal = inputMap.down("toggle_original")
+  -- Tab holds the original up, and Tab also moves between the panel's typed
+  -- fields, so while one is open it is not asking for the original.
+  local showOriginal = inputMap.down("toggle_original") and not self.panel:isEditing()
   local drawable = showOriginal and self.pipeline.source or self.pipeline:getResult()
   local scale = self.zoom
   if showOriginal then
@@ -479,11 +602,21 @@ function Viewer:draw()
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.draw(drawable, self.offsetX, self.offsetY, 0, scale, scale)
   -- The grid sits over whichever image is showing, including the original:
-  -- it measures the composition rather than altering the values.
+  -- it measures the composition rather than altering the values. It divides
+  -- the crop when there is one, because the crop is the panel it is there to
+  -- help transfer onto.
   if self.pipeline:isEnabled("grid") then
     local values = self.pipeline:getState("grid").values
-    grid.draw(self.offsetX, self.offsetY, self.pipeline.width * self.zoom,
-      self.pipeline.height * self.zoom, values.columns, values.rows, 1)
+    local rx, ry, rw, rh = self:documentRect()
+    grid.draw(self.offsetX + rx * self.zoom, self.offsetY + ry * self.zoom,
+      rw * self.zoom, rh * self.zoom, values.columns, values.rows, 1)
+  end
+  local rect = self.crop:getRect()
+  if rect then
+    cropOverlay.draw(self.offsetX, self.offsetY,
+      self.pipeline.width * self.zoom, self.pipeline.height * self.zoom,
+      self.offsetX + rect.x * self.zoom, self.offsetY + rect.y * self.zoom,
+      rect.w * self.zoom, rect.h * self.zoom, cropOverlay.HANDLE)
   end
   love.graphics.setScissor()
   love.graphics.pop()
@@ -527,7 +660,13 @@ function Viewer:drawStatus(vw, vh, showOriginal)
   if not left then
     left = (self.imageName or "image")
       .. "  " .. self.sourceWidth .. "x" .. self.sourceHeight
-      .. "  " .. string.format("%d%%", math.floor(self.zoom * 100 + 0.5))
+    -- What the export will actually be, which is the number that matters once
+    -- a crop is on and is not derivable from the source size.
+    local rect = self.crop:getRect()
+    if rect then
+      left = left .. " -> " .. rect.w .. "x" .. rect.h .. " " .. self.crop:ratioText()
+    end
+    left = left .. "  " .. string.format("%d%%", math.floor(self.zoom * 100 + 0.5))
     if showOriginal then
       left = left .. "  (original)"
     end
@@ -541,7 +680,7 @@ function Viewer:drawStatus(vw, vh, showOriginal)
   -- The key list is the first thing to go when the window gets tight: it
   -- would run into the file name long before it ran out of window, and the
   -- narrow sizes are phones, which have no keyboard for it to describe.
-  local hint = "O open   E export   TAB original   0 fit   1 100%   G grid   R reset   H "
+  local hint = "O open   E export   TAB original   0 fit   1 100%   K crop   G grid   R reset   H "
     .. (self.panel.visible and "hide panel" or "show panel")
   local hintWidth = small:getWidth(hint)
   if small:getWidth(left) + hintWidth + 30 <= vw then
@@ -557,7 +696,18 @@ end
 --- likes for value studies is a preference, not per-image state. The image
 --- itself is not restored, only the knobs.
 function Viewer:saveSettings()
-  local data = { effects = {} }
+  -- The canvas dimensions belong here for the same reason: a 16x20 panel is
+  -- still 16x20 next time. The box itself is not saved -- it belongs to the
+  -- photo, and the photo is not restored either.
+  local cropValues = self.crop:getState("crop").values
+  local data = {
+    effects = {},
+    crop = {
+      enabled = self.crop:isEnabled("crop"),
+      width = cropValues.width,
+      height = cropValues.height,
+    },
+  }
   for _, def in ipairs(self.pipeline.defs) do
     local state = self.pipeline:getState(def.id)
     local values = {}
@@ -573,7 +723,19 @@ end
 --- older save never blocks a changed effect list.
 function Viewer:restoreSettings()
   local data = saveManager.load()
-  if not data or type(data.effects) ~= "table" then return end
+  if not data then return end
+
+  if type(data.crop) == "table" then
+    if type(data.crop.width) == "number" then
+      self.crop:setValue("crop", "width", data.crop.width)
+    end
+    if type(data.crop.height) == "number" then
+      self.crop:setValue("crop", "height", data.crop.height)
+    end
+    self.crop:setEnabled("crop", data.crop.enabled == true)
+  end
+
+  if type(data.effects) ~= "table" then return end
   for _, def in ipairs(self.pipeline.defs) do
     local saved = data.effects[def.id]
     if type(saved) == "table" then

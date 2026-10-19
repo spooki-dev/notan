@@ -113,6 +113,13 @@ function sceneManager.keyreleased(key, scancode)
   end
 end
 
+function sceneManager.textinput(text)
+  local scene = scenes[currentScene]
+  if scene and scene.textinput then
+    scene:textinput(text)
+  end
+end
+
 --- An input action went down this frame (see engine/input/inputMap.lua).
 --- @param name string Action name
 function sceneManager.actionPressed(name)
