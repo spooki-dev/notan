@@ -33,6 +33,7 @@ local DEFAULT_WATCH_DIRS = { "engine", "scenes", "gameObjects", "constants" }
 ---@field assets AssetConfig|nil Marketing assets rendered by `love . --export-assets` (see engine/AssetExporter.lua)
 ---@field input InputConfig|nil Named input actions and their default bindings (see engine/input/inputMap.lua)
 ---@field device DeviceConfig|nil File picker and camera defaults (see engine/device/filePicker.lua)
+---@field icon string|nil Window icon, a path inside the game source. Ignored if the file is missing.
 
 ---@class DeviceConfig
 ---@field filePicker FilePickerConfig|nil Defaults for engine/device/filePicker.lua
@@ -50,6 +51,7 @@ local DEFAULT_WATCH_DIRS = { "engine", "scenes", "gameObjects", "constants" }
 ---@field scenes table Scene constructors to register
 ---@field defaultScene string Starting scene name
 ---@field cursors table<string, CursorConfig>
+---@field icon string|nil
 ---@field shaders table
 ---@field watch table
 ---@field assets AssetConfig|nil
@@ -74,6 +76,7 @@ function Game:new(config)
   self.scenes = config.scenes
   self.defaultScene = config.defaultScene
   self.cursors = config.cursors or {}
+  self.icon = config.icon
   self.shaders = config.shaders or {}
   self.watch = config.watch or DEFAULT_WATCH_DIRS
   self.mcpPort = config.mcpPort
@@ -234,6 +237,17 @@ function Game:load(args)
 
   -- Set up the window
   love.window.setTitle(self.title)
+  -- The window icon is what the dock, the taskbar and the alt-tab switcher
+  -- show; without it they fall back to the LÖVE default whatever icon the
+  -- .app or .exe carries. Set here rather than through conf.lua's
+  -- t.window.icon, which hangs the process if the file is not there.
+  if self.icon then
+    if love.filesystem.getInfo(self.icon) then
+      love.window.setIcon(love.image.newImageData(self.icon))
+    else
+      print("Game: window icon " .. self.icon .. " not found, keeping the default")
+    end
+  end
   love.graphics.setColor(1, 1, 1)
   love.graphics.setFont(love.graphics.newFont(30))
   love.graphics.setLineWidth(5)

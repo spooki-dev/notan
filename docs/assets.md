@@ -42,6 +42,18 @@ The asset scenes add fonts lazily under `asset-<size>` keys. `gameObjects/Wordma
 
 `engine/input/glyphs.lua` exports `IMAGE_KEY = "input-prompts"` and `IMAGE_PATH = "assets/graphics/input-prompts.png"`. `InputPrompt` needs that image in the cache; without it, prompts fall back to drawn text keycaps.
 
+## The window icon
+
+The dock, the taskbar and the alt-tab switcher read the icon from the window, not from the `.app` or the `.exe`, so without one they show the LÖVE default heart however the package is built. `main.lua` points the `Game` config at a packaged copy:
+
+```lua
+icon = "assets/app-icon.png",
+```
+
+`engine/Game.lua` applies it in `Game:load` with `love.window.setIcon`, after checking the file is there — a missing path only prints a line and keeps the default. Do not use `t.window.icon` in `conf.lua` for this: if that file is missing LÖVE wedges at startup with nothing on stdout.
+
+The file is rendered by the same `AssetIcon` scene as `assets/generated/icon.png`, through the `outputDir` field described below, because `assets/generated/` is excluded from the `.love` and this one has to ship.
+
 ## Cursors
 
 Cursors are declared in the `cursors` block of the `Game` config in `main.lua`. Each entry has an image `path` and a hotspot (`hotX`, `hotY`):
@@ -89,12 +101,13 @@ Only one music track plays at a time. In dev, the hot reload callback calls `sto
 assets = {
   outputDir = "assets/generated",
   items = {
-    { name = "icon",    scene = AssetIcon,    width = 1024, height = 1024 },
-    { name = "favicon", scene = AssetFavicon, width = 64,   height = 64 },
-    { name = "cover",   scene = AssetCover,   width = 630,  height = 500 },
-    { name = "social",  scene = AssetSocial,  width = 1200, height = 630 },
-    { name = "wide",    scene = AssetWide,    width = 1920, height = 1080 },
-    { name = "logo",    scene = AssetLogo,    width = 1600, height = 400,  transparent = true },
+    { name = "icon",     scene = AssetIcon,    width = 1024, height = 1024 },
+    { name = "app-icon", scene = AssetIcon,    width = 256,  height = 256,  outputDir = "assets" },
+    { name = "favicon",  scene = AssetFavicon, width = 64,   height = 64 },
+    { name = "cover",    scene = AssetCover,   width = 630,  height = 500 },
+    { name = "social",   scene = AssetSocial,  width = 1200, height = 630 },
+    { name = "wide",     scene = AssetWide,    width = 1920, height = 1080 },
+    { name = "logo",     scene = AssetLogo,    width = 1600, height = 400,  transparent = true },
   },
 },
 ```
@@ -106,12 +119,14 @@ assets = {
 | `width`, `height` | number | Exact output size in pixels. |
 | `transparent` | boolean, optional | Clear to transparent instead of the scene's `backgroundColor`. |
 | `postProcess` | boolean, optional | Run the `shaders` chain from the `Game` config over the result. |
+| `outputDir` | string, optional | Write this one image somewhere else, relative to the project root. Everything in `assets/generated/` is excluded from the `.love`, so an image the game itself loads at runtime needs this. |
 
 `transparent` and `postProcess` are mutually exclusive: shaders force alpha to 1, and `AssetExporter.render` asserts if both are set. `outputDir` defaults to `assets/generated` and is relative to the project source directory.
 
 | Image | Size | Used for |
 |---|---|---|
 | `icon.png` | 1024x1024 | Mac `.icns`, Windows `.exe` icon, store listings |
+| `assets/app-icon.png` | 256x256 | The window icon, read at runtime — the only one that ships inside the `.love` |
 | `favicon.png` | 64x64 | Web build favicon |
 | `cover.png` | 630x500 | itch.io cover image |
 | `social.png` | 1200x630 | OpenGraph and social posts |
@@ -137,7 +152,9 @@ function AssetCover:load()
 end
 ```
 
-`Wordmark` takes `lines` (title lines, top to bottom), an optional `subtitle`, `titleSize` and optional `subtitleSize` (default is `titleSize / 3` snapped down to a multiple of 8), `color`, `subtitleColor`, `gap` and `canvasHeight`, which centres the block vertically. Title colour defaults to `colors.vec4Yellow` and subtitle to `colors.vec4Grey` from `constants/colors.lua`. `Icon.lua` and `Favicon.lua` wrap the wordmark in a `UIBox` frame with a `colors.vec4Green` border.
+`Wordmark` takes `lines` (title lines, top to bottom), an optional `subtitle`, `titleSize` and optional `subtitleSize` (default is `titleSize / 3` snapped down to a multiple of 8), `color`, `subtitleColor`, `gap` and `canvasHeight`, which centres the block vertically. Title colour defaults to `colors.vec4Yellow` and subtitle to `colors.vec4Grey` from `constants/colors.lua`.
+
+`Icon.lua` and `Favicon.lua` are the exception: they carry no text at all. Both are one full-bleed `gameObjects/NotanMark.lua`, a landscape reduced to three flat masses of value — light sky, mid peak, dark peak — because that is what the app does to a photograph and because a wordmark is illegible at the 16x16 a dock or a browser tab actually draws. The mark is defined as fractions of a square, so the same code serves 1024px and 64px.
 
 To put your own game's name on the images, edit the `lines` and `subtitle` in each asset scene (and the Menu wordmark in `scenes/Menu.lua`). `init.sh` does this for you when scaffolding; the `{ "NEW", "GAME" }`, `"NEW GAME"` and `{ "N" }` literals are its anchors, so if you rename them in the template, update `init.sh` too.
 
@@ -147,7 +164,7 @@ To put your own game's name on the images, edit the `lines` and `subtitle` in ea
 /Applications/love.app/Contents/MacOS/love . --export-assets
 ```
 
-`Game:load` checks `Game:hasArg("--export-assets")` after scenes and shaders are set up but before hot reload or the MCP bridge start. `AssetExporter.export` creates `outputDir`, then for each item constructs the scene, runs `load()`, `handleLoad()`, `start()` and one `handleUpdate(0)`, draws it to a canvas of the exact size, optionally runs the post-processing chain, encodes PNG and writes it with plain `io` so the file can land outside LÖVE's save directory. It prints `exported <path> (<w>x<h>)` per image and the game quits without drawing a frame. `scripts/release.sh` runs this as its first step and fails if any of the six files is missing.
+`Game:load` checks `Game:hasArg("--export-assets")` after scenes and shaders are set up but before hot reload or the MCP bridge start. `AssetExporter.export` creates `outputDir`, then for each item constructs the scene, runs `load()`, `handleLoad()`, `start()` and one `handleUpdate(0)`, draws it to a canvas of the exact size, optionally runs the post-processing chain, encodes PNG and writes it with plain `io` so the file can land outside LÖVE's save directory. It prints `exported <path> (<w>x<h>)` per image and the game quits without drawing a frame. `scripts/release.sh` runs this as its first step and fails if any of the six files in `assets/generated/` is missing.
 
 ## Credits
 
