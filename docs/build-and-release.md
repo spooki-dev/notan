@@ -4,7 +4,7 @@ description: Keeping the code Lua 5.1 compatible for the web build, and running 
 order: 8
 ---
 
-One script, `scripts/release.sh`, does the whole release: it regenerates the marketing art, builds the `.love`, packages Mac and Windows from the official LÖVE 11.5 runtime with the generated icon baked in, builds the web version with love.js and a favicon, pushes every channel to itch.io with butler, then prints the page images you still have to upload by hand. Before any of that matters, the code has to parse under Lua 5.1, because the web build does not run on LuaJIT.
+One script, `scripts/release.sh`, does the whole release: it regenerates the marketing art, builds the `.love`, packages Mac and Windows from the official LÖVE 11.5 runtime with the generated icon baked in, builds the web version with love.js and a favicon, pushes every channel to itch.io with butler, then prints the page images you still have to upload by hand. Before any of that matters, the code has to parse under Lua 5.1, because the web build does not run on LuaJIT, and every module it reaches for has to be inside the `.love`.
 
 ## Lua 5.1 compatibility
 
@@ -22,6 +22,7 @@ Three layers enforce this:
 | `.luarc.json` | Sets `Lua.runtime.version` to `Lua 5.1`, so LuaLS flags the constructs above as syntax errors in the editor. |
 | `scripts/lint-lua51.sh [files...]` | Parses files with a real `luac` 5.1 (`luac -p`, no execution). With no arguments it checks every tracked `.lua` file (`git ls-files '*.lua'`). |
 | `.githooks/pre-commit` | Runs the lint over staged `.lua` files and blocks the commit on a parse error. Enable it once per clone with `git config core.hooksPath .githooks`. |
+| `.github/workflows/ci.yml` | Runs the lint and `scripts/check-requires.sh` on every push and pull request. |
 
 Homebrew no longer ships `lua@5.1`, so on first run `scripts/lint-lua51.sh` downloads the official Lua 5.1.5 tarball and builds it into `~/.cache/love-release/` (override the location with `LOVE_RELEASE_CACHE`). `scripts/release.sh` also runs the lint over the exact files inside the built `.love`, so the web build cannot ship something only LuaJIT accepts.
 
@@ -37,8 +38,7 @@ git config core.hooksPath .githooks        # enable the pre-commit hook
 
 | Tool | Where it comes from | Used for |
 |---|---|---|
-| `love` | `/Applications/love.app/Contents/MacOS/love` (the `LOVE` variable) | `love . --export-assets`; the script also prepends its directory to `PATH` for `love-release` |
-| `love-release` | Installed separately | Building the `.love` with its exclude list |
+| `love` | `/Applications/love.app/Contents/MacOS/love` (the `LOVE` variable) | `love . --export-assets` |
 | `love.js` | Installed separately | The web build |
 | `butler` | https://itch.io/docs/butler/ (the Homebrew `butler` cask is an unrelated app) | Pushing channels to itch.io; run `butler login` once in a real terminal |
 | `node`, `npm` | Node.js | `scripts/patch-win-icon.mjs`, with dependencies from `scripts/package.json` (`pe-library`, `png-to-ico`, `resedit`) |
@@ -54,7 +54,7 @@ Fill in the variables at the top of `scripts/release.sh`. `init.sh` rewrites the
 | `TITLE` | `"New Game"` | Display name; names the `.love`, the `.app` and the zips |
 | `PKG` | `newgame` | Package slug; names `releases/<PKG>/` and the Windows `.exe` |
 | `UTI` | `com.example.newgame` | Bundle identifier written to `CFBundleIdentifier` |
-| `AUTHOR` | `"Your Name"` | Passed to `love-release -a` |
+| `AUTHOR` | `"Your Name"` | Release author |
 | `ITCH` | `your-itch-username/your-game-slug` | butler target; channels are appended as `${ITCH}:mac` and so on |
 | `ITCH_EDIT_URL` | `https://your-itch-username.itch.io/your-game-slug/edit` | Opened after a push |
 
@@ -71,8 +71,8 @@ love . --export-assets        # only regenerate assets/generated/*.png
 The script runs with `set -euo pipefail` from the repo root and uses a temporary work directory that is removed on exit. A full run does the following, in order:
 
 1. **Export marketing assets.** Runs `love . --export-assets` and checks that `icon`, `favicon`, `cover`, `social`, `wide` and `logo` PNGs exist in `assets/generated/` (see `assets.md`).
-2. **Build `.love`.** Empties `releases/<PKG>/`, then runs `love-release -t "$TITLE" -a "$AUTHOR" --uti "$UTI" -p "$PKG"` with excludes for `DEV`, `.git`, `releases`, `designs`, `docs`, `.aider`, `.claude`, `.vscode`, `engine/dev`, `.md`, `scripts`, `assets/generated` and `init.sh`. Output is `releases/<PKG>/<TITLE>.love`.
-3. **Lint the `.love`.** Unzips it and runs `scripts/lint-lua51.sh` over every `.lua` inside.
+2. **Build `.love`.** Empties `releases/<PKG>/`, then zips the paths `scripts/love-filelist.sh` prints into `releases/<PKG>/<TITLE>.love`. A `.love` is only a zip with `main.lua` at the root, so there is nothing else to it.
+3. **Check the `.love`.** Unzips it, runs `scripts/lint-lua51.sh` over every `.lua` inside, then `scripts/check-requires.sh` over the unpacked tree.
 4. **Fetch runtimes.** Downloads `love-11.5-macos.zip`, `love-11.5-win32.zip` and `love-11.5-win64.zip` from the LÖVE GitHub releases into `~/.cache/love-release/` if not already cached.
 5. **Build `.icns`.** Resizes `icon.png` with `sips` to 16 through 512 plus `@2x` variants and runs `iconutil -c icns`.
 6. **Package macOS.** Renames `love.app` to `<TITLE>.app`, copies the `.love` into `Contents/Resources/`, writes the `.icns` as `OS X AppIcon.icns` and `GameIcon.icns`, sets `CFBundleIdentifier`, `CFBundleName` and `CFBundleDisplayName`, removes `CFBundleIconName` and `UTExportedTypeDeclarations`, ad-hoc signs with `codesign --force --deep --sign -`, and zips to `<TITLE>-macos.zip`.
@@ -96,12 +96,26 @@ Everything lands in `releases/<PKG>/`, which is git-ignored:
 
 ### What ships and what does not
 
-The exclude list keeps `docs/`, every `.md` file, `scripts/`, `engine/dev/`, `init.sh`, `.vscode/`, `releases/` and `assets/generated/` out of the `.love`. Excluding `engine/dev` removes the MCP bridge; `engine/Game.lua` requires it through `pcall`, so a shipped build silently skips it. Hot reload and the MCP bridge are otherwise switched by `env = "dev"` in `main.lua`: nothing in the engine reads a `DEV` file, so the `-x DEV` exclude only matters if you create one.
+`scripts/love-filelist.sh` is the single definition of the contents, and `scripts/release.sh` and CI both read it, so the build and the test can never disagree about what is in there. It starts from `git ls-files` — an untracked file is never packaged, which is why the local-only photos in `assets/sample-photos/` stay on your machine — and drops dotfiles, `docs/`, `scripts/`, `designs/`, `examples/`, `releases/`, `assets/generated/`, `engine/dev/` and every `.md`.
+
+Dropping `engine/dev/` removes the MCP bridge; `engine/Game.lua` requires it through `pcall`, so a shipped build silently skips it. Hot reload and the bridge are otherwise switched by `env = "dev"` in `main.lua`.
+
+Every exclude is an **anchored** extended regex matched against the whole path, and it has to stay that way. The script that this replaced, `love-release`, matched its excludes as unanchored Lua patterns, so `-x engine/dev` also matched `engine/device/` and shipped a `.love` that died on startup with `module 'engine.device.backends' not found` while the working tree was perfectly healthy.
+
+### Checking the contents
+
+```sh
+scripts/love-filelist.sh              # what goes in the .love
+scripts/check-requires.sh             # resolve every reference against that list
+scripts/check-requires.sh some/dir    # ...or against an unpacked .love
+```
+
+`scripts/check-requires.sh` reads every `require "a.b.c"` and every quoted file path (`"assets/fonts/PixelOperator8.ttf"`, `"engine/device/threads/pickerThread.lua"`) out of the shipped Lua and fails if one of them points at a file that is not there. A `require` reached through `pcall` is treated as optional, because that is how the engine reaches the dev-only bridge. With no argument it builds the shipped list itself, which is the form CI runs: a missing module only shows up against the packaged file set, never against the working tree.
 
 ## Platform notes
 
-- `love-release` is capped at LÖVE 11.3, so the script uses it only to produce the `.love` and assembles Mac and Windows packages itself from the 11.5 runtime zips.
-- The Windows icon is replaced inside the PE resource table by `scripts/patch-win-icon.mjs` (`node scripts/patch-win-icon.mjs <in.exe> <out.exe> <png> [<png>...]`), pure JavaScript via `pe-library` and `resedit`, so no Windows tooling is needed on macOS. The `.love` is then appended to the exe, the same trick `love-release` uses.
+- Mac and Windows packages are assembled from the official 11.5 runtime zips rather than by a packaging tool, so the shipped runtime is exactly the version the game targets.
+- The Windows icon is replaced inside the PE resource table by `scripts/patch-win-icon.mjs` (`node scripts/patch-win-icon.mjs <in.exe> <out.exe> <png> [<png>...]`), pure JavaScript via `pe-library` and `resedit`, so no Windows tooling is needed on macOS. The `.love` is then appended to the exe, which is how LÖVE finds a fused game.
 - The Mac icon is an `.icns` built with `iconutil`. With `CFBundleIconName` present macOS reads the icon from `Assets.car`, so the script removes that key.
 - Signing is ad-hoc; a failure prints a warning and continues.
 

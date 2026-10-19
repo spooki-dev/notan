@@ -44,11 +44,13 @@ Hot reload is on in dev: saved edits under `engine/`, `scenes/`, `gameObjects/`,
 ## Release
 
 ```sh
-scripts/release.sh            # export assets, build Mac/Windows/web/.love, push to itch.io
+scripts/release.sh            # export assets, build Mac/Windows/.love, publish a GitHub release
 scripts/release.sh --no-push  # build only; artefacts land in releases/notan/
 /Applications/love.app/Contents/MacOS/love . --export-assets       # regenerate assets/generated/*.png only
 ```
 
-`TITLE`, `PKG`, `UTI`, `AUTHOR` and `ITCH` are set at the top of `scripts/release.sh`. Requires `love-release`, `love.js`, `butler` (logged in), node and the macOS `iconutil`/`sips`/`plutil` tools.
+`TITLE`, `PKG`, `UTI`, `AUTHOR`, `REPO` and `VERSION` are set at the top of `scripts/release.sh`. Requires `gh` (logged in), node and the macOS `iconutil`/`sips`/`plutil` tools.
+
+`scripts/love-filelist.sh` decides what goes inside the `.love`, and `scripts/check-requires.sh` proves every `require` and asset path in it resolves against that list — run on every push by `.github/workflows/ci.yml`, because a module missing from the package never shows up in the working tree.
 
 See `CLAUDE.md` for the architecture and engine contracts, and `AGENTS.md` for the short version.

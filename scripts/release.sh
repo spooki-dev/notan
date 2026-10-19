@@ -6,10 +6,10 @@
 #   scripts/release.sh --no-push  # everything except the gh release
 #   VERSION=0.2.0 scripts/release.sh
 #
-# Steps: regenerate marketing art (love . --export-assets) -> .love via
-# love-release -> Mac .app and Windows .exe packaged from the official LÖVE
-# runtime with the generated icon baked in -> gh release create with all four
-# downloads attached. spookidev.com/notan links at /releases/latest/download/,
+# Steps: regenerate marketing art (love . --export-assets) -> .love zipped from
+# scripts/love-filelist.sh -> Mac .app and Windows .exe packaged from the
+# official LÖVE runtime with the generated icon baked in -> gh release create
+# with all four downloads attached. spookidev.com/notan links at /releases/latest/download/,
 # so the page needs no change when a release goes out.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -22,9 +22,8 @@ REPO=spooki-dev/notan
 # Bump for every release; the tag is v$VERSION and gh refuses an existing one.
 VERSION="${VERSION:-0.1.0}"
 LOVE=/Applications/love.app/Contents/MacOS/love
-export PATH="$(dirname "$LOVE"):$PATH"   # love-release shells out to `love`
-# love-release only supports LÖVE <= 11.3, so Mac/Windows packages are built
-# here from the official runtime zips for the version the game targets.
+# Mac/Windows packages are built here from the official runtime zips for the
+# version the game targets.
 LOVE_RUNTIME_VERSION=11.5
 RUNTIME_CACHE="$HOME/.cache/love-release"
 OUT=releases/$PKG
@@ -33,7 +32,7 @@ SHA=$(git rev-parse --short HEAD)
 PUSH=1
 [[ "${1:-}" == "--no-push" ]] && PUSH=0
 
-for tool in "$LOVE" iconutil sips plutil codesign zip unzip curl node npm love-release gh; do
+for tool in "$LOVE" iconutil sips plutil codesign zip unzip curl node npm gh; do
   command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }
 done
 
@@ -49,21 +48,27 @@ for name in icon favicon cover social wide logo; do
 done
 
 step "Build .love"
+# A .love is just a zip with main.lua at the root. scripts/love-filelist.sh
+# decides what goes in; this used to be love-release, whose exclude list was
+# matched as unanchored Lua patterns, so "-x engine/dev" quietly took
+# engine/device/ with it and shipped a build that could not boot.
 rm -rf "$OUT"
 mkdir -p "$OUT"
-love-release -t "$TITLE" -a "$AUTHOR" --uti "$UTI" -p "$PKG" \
-  -x DEV -x .git -x releases -x designs -x docs -x .aider -x .claude -x .vscode \
-  -x engine/dev -x .md -x scripts -x assets/generated -x init.sh -x examples \
-  "$OUT" . >/dev/null
 LOVEFILE="$OUT/$TITLE.love"
-[[ -f "$LOVEFILE" ]] || { echo "love-release did not produce $LOVEFILE" >&2; exit 1; }
+scripts/love-filelist.sh > "$WORK/filelist"
+[[ -s "$WORK/filelist" ]] || { echo "scripts/love-filelist.sh produced nothing" >&2; exit 1; }
+grep -qx 'main.lua' "$WORK/filelist" || { echo "main.lua is not in the .love file list" >&2; exit 1; }
+zip -q -X -@ "$PWD/$LOVEFILE" < "$WORK/filelist"
+echo "packaged $(wc -l < "$WORK/filelist" | tr -d ' ') files into $LOVEFILE"
 
-step "Check shipped Lua parses under Lua 5.1"
-# The engine is kept inside the Lua 5.1 subset LuaJIT and PUC Lua share, which
-# .luarc.json and the pre-commit hook also enforce. Check the exact files
-# inside the .love, not the working tree.
+step "Check the .love is complete and parses under Lua 5.1"
+# Check the exact files inside the .love, not the working tree: the engine is
+# kept inside the Lua 5.1 subset LuaJIT and PUC Lua share (.luarc.json and the
+# pre-commit hook enforce that too), and every require and asset path has to
+# point at a file that actually got packaged.
 unzip -q "$LOVEFILE" -d "$WORK/lovecheck"
 (cd "$WORK/lovecheck" && "$OLDPWD/scripts/lint-lua51.sh" $(find . -name '*.lua' | sed 's|^\./||'))
+scripts/check-requires.sh "$WORK/lovecheck"
 
 step "Fetch LÖVE $LOVE_RUNTIME_VERSION runtimes"
 mkdir -p "$RUNTIME_CACHE"
@@ -111,8 +116,8 @@ for arch in 32 64; do
   SRC="$DIR/love-$LOVE_RUNTIME_VERSION-win$arch"
   [[ -f "$SRC/love.exe" ]] || { echo "unexpected layout in win$arch runtime zip" >&2; ls "$DIR" >&2; exit 1; }
   node scripts/patch-win-icon.mjs "$SRC/love.exe" "$DIR/love-icon.exe" "$WORK"/ico/*.png
-  # Same trick love-release uses: the .love zip is appended to the exe and
-  # found via its end-of-central-directory record.
+  # The .love zip is appended to the exe and found via its end-of-central-
+  # directory record, which is how LÖVE finds a fused game.
   cat "$DIR/love-icon.exe" "$LOVEFILE" > "$SRC/$PKG.exe"
   rm -f "$SRC/love.exe" "$SRC/lovec.exe" "$SRC/readme.txt" "$SRC/changes.txt" "$SRC/love.ico" "$SRC/game.ico"
   mv "$SRC" "$DIR/$TITLE-win$arch"
