@@ -24,9 +24,11 @@ package.preload["shadows.ShadowShapes.ImageShadow"]	=	assert(love.filesystem.loa
 package.preload["shadows.ShadowShapes.NormalShadow"]	=	assert(love.filesystem.load(Path.."/ShadowShapes/NormalShadow.lua"))
 package.preload["shadows.ShadowShapes.PolygonShadow"]	=	assert(love.filesystem.load(Path.."/ShadowShapes/PolygonShadow.lua"))
 
--- Rooms
+-- Rooms. Room.lua sits beside Room/ rather than inside it (upstream has it at
+-- Room/Room.lua) because the subclasses were rewritten to pull it in with
+-- `require("engine.lib.shadows.Room")`, and that name has to resolve to a file.
 
-package.preload["shadows.Room"]						=		assert(love.filesystem.load(Path.."/Room/Room.lua"))
+package.preload["shadows.Room"]						=		assert(love.filesystem.load(Path.."/Room.lua"))
 package.preload["shadows.Room.CircleRoom"]		=		assert(love.filesystem.load(Path.."/Room/CircleRoom.lua"))
 package.preload["shadows.Room.PolygonRoom"]		=		assert(love.filesystem.load(Path.."/Room/PolygonRoom.lua"))
 package.preload["shadows.Room.RectangleRoom"]	=		assert(love.filesystem.load(Path.."/Room/RectangleRoom.lua"))

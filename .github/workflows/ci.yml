@@ -1,0 +1,30 @@
+name: CI
+
+# Two checks, both run against the file list that goes inside the .love rather
+# than the working tree: a .love is missing a module the moment an exclude
+# pattern is too greedy, and the working tree never shows it. See
+# scripts/love-filelist.sh and scripts/check-requires.sh.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache the Lua 5.1 build
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/love-release
+          key: lua-5.1.5-${{ runner.os }}
+
+      # love.js runs the game on PUC Lua 5.1, not LuaJIT.
+      - name: Lua 5.1 parse
+        run: scripts/lint-lua51.sh
+
+      # Every require and asset path has to resolve inside the packaged game.
+      - name: Packaged requires resolve
+        run: scripts/check-requires.sh

@@ -26,7 +26,7 @@ love.js runs the game on PUC Lua 5.1, not LuaJIT, so game and engine code must s
 
 - `.luarc.json` sets the LuaLS runtime to `Lua 5.1`, so the editor flags these as syntax errors.
 - `scripts/lint-lua51.sh [files...]` parses files with a real `luac` 5.1 (`-p`, no execution). It builds Lua 5.1.5 from the official tarball into `~/.cache/love-release/` on first run because Homebrew no longer ships `lua@5.1`. With no arguments it checks every tracked `.lua` file.
-- `.githooks/pre-commit` runs that lint over staged Lua files. Enable it per clone with `git config core.hooksPath .githooks`. `scripts/release.sh` also runs it over the contents of the built `.love` before packaging anything.
+- `.githooks/pre-commit` runs that lint over staged Lua files. Enable it per clone with `git config core.hooksPath .githooks`. `scripts/release.sh` also runs it over the contents of the built `.love` before packaging anything, and so does `.github/workflows/ci.yml`.
 
 ### Build and release
 
@@ -39,7 +39,9 @@ love . --export-assets        # just regenerate assets/generated/*.png and quit
 ```
 
 Notes:
-- `love-release` is capped at LÖVE 11.3, so it is only used to produce the `.love` (for its exclude list). Mac/Windows packages are assembled by the script from `love-11.5-{macos,win32,win64}.zip`, cached in `~/.cache/love-release/`.
+- The `.love` is a plain zip of the paths `scripts/love-filelist.sh` prints: `git ls-files` minus a list of **anchored** extended regexes. Keep them anchored. This replaced `love-release`, which matched its excludes as unanchored Lua patterns, so `-x engine/dev` also swallowed `engine/device/` and shipped a build that died on `module 'engine.device.backends' not found`.
+- `scripts/check-requires.sh` is the regression test for that: it resolves every `require "a.b.c"` and every quoted asset path in the shipped Lua against the shipped file list, treating a `pcall(require, ...)` as optional. `scripts/release.sh` runs it over the unpacked `.love` and CI runs it over the file list, because the working tree never shows a module that packaging dropped.
+- Mac/Windows packages are assembled by the script from `love-11.5-{macos,win32,win64}.zip`, cached in `~/.cache/love-release/`.
 - The tracked `DEV` marker file turns on hot reload and the MCP bridge; builds exclude it so shipped copies run clean.
 - Windows icons are patched into `love.exe` by `scripts/patch-win-icon.mjs` (node, deps in `scripts/package.json`). The Mac icon is an `.icns` built with `iconutil`; the script also removes `CFBundleIconName` so macOS reads the `.icns` rather than `Assets.car`.
 - The web page is our own template in `scripts/web/` (`index.html` with a `{{TITLE}}` placeholder, `theme/love.css`), copied over the love.js output so the page shows only the canvas on black: no heading, footer or "Powered by" text. love.js's `game.js`/`love.js`/`love.wasm`/`game.data` are kept as generated. Change the colours in `theme/love.css` and the loading text in `index.html` to suit the game.

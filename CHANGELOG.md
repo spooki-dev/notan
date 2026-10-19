@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-20
+
+- Fixed the macOS and Windows builds failing on startup with `module 'engine.device.backends' not found`. The packaging step matched its exclude list loosely, so the rule meant to drop the dev-only `engine/dev/` folder took `engine/device/` with it — the file picker, the camera and every other device backend — and the released app could not open an image, or start at all.
+
 ## 2026-10-19
 
 - Added cropping to a canvas ratio: type the dimensions of the panel you are painting on into the Crop section, and a box locked to that ratio appears over the photo. Drag it to frame the shot or a corner to resize it, `K` toggles it, `0` fits the crop rather than the whole image, the grid divides the crop, and the export is the box. The dimensions are remembered between sessions; the box resets with each new photo.

@@ -1,6 +1,8 @@
 # AGENTS.md
 
-Notan: a desktop image tool for painters (open a photo, stack GPU effects over it — blur, levels, saturation, posterise — to read its values as flat shapes), built on the spooki-love LÖVE (Love2D) 11.5 template in plain Lua. Desktop runs LuaJIT but the love.js web build runs PUC Lua 5.1, so code must stay within the shared 5.1 subset: no `goto`/`::label::`, no `ffi`/`jit`/`bit`, no `table.unpack`. `scripts/lint-lua51.sh` checks this with a real Lua 5.1 parser; the pre-commit hook in `.githooks/` and `scripts/release.sh` both run it. No package manager.
+Notan: a desktop image tool for painters (open a photo, stack GPU effects over it — blur, levels, saturation, posterise — to read its values as flat shapes), built on the spooki-love LÖVE (Love2D) 11.5 template in plain Lua. Desktop runs LuaJIT but the love.js web build runs PUC Lua 5.1, so code must stay within the shared 5.1 subset: no `goto`/`::label::`, no `ffi`/`jit`/`bit`, no `table.unpack`. `scripts/lint-lua51.sh` checks this with a real Lua 5.1 parser; the pre-commit hook in `.githooks/`, `scripts/release.sh` and CI all run it. No package manager.
+
+What ships inside the `.love` is `scripts/love-filelist.sh` (anchored excludes over `git ls-files`), and `scripts/check-requires.sh` proves every `require` and quoted asset path resolves against that list. Both run in `.github/workflows/ci.yml` and in `scripts/release.sh`. Keep the excludes anchored: an unanchored `engine/dev` once matched `engine/device/` too and shipped a build that could not boot.
 
 ## Run / verify
 
@@ -22,7 +24,7 @@ There is no lint or test command. Verify by running the app (`love . path/to/pho
 - A scene may define `updateShaderUniforms(uniforms, dt)`; the engine clears `postProcessing.uniforms` every frame and calls it. Shaders passed in the `shaders` config read from it (none ship with the template).
 - Saves go through `engine/saveManager` (single slot, Lua-source file in the save dir, never throws; `version` + optional `migrate`). The engine only stores the table it is given. `Game:quit` calls the current scene's optional `onQuit()`; `sceneManager.resetScene`/`addScene` return the instance and `getScene(name)` looks one up. Keep `t.identity` set in `conf.lua`.
 - Assets/fonts must be preloaded through `engine/cacheManager` (see `scenes/Preload.lua`) before use. Font keys `header`, `subheader`, `body`, `small` and cursor keys `default`, `active` are contracts relied on by `engine/ui`.
-- Marketing art in `assets/generated/` is rendered by `love . --export-assets` from `scenes/assets/*.lua` (engine side: `engine/AssetExporter.lua`); `scripts/release.sh` runs that, builds every platform and pushes to itch with butler. Do not hand-edit the generated PNGs.
+- Marketing art in `assets/generated/` is rendered by `love . --export-assets` from `scenes/assets/*.lua` (engine side: `engine/AssetExporter.lua`); `scripts/release.sh` runs that, builds every platform and publishes a GitHub release. Do not hand-edit the generated PNGs.
 - `constants/colors.lua` exports decimal `{r,g,b}` tables (`black`, `dark`, `light`, `white`, `green`) plus `vec4*` variants; UI code passes `Vector4(r,g,b,a)`.
 
 ## UI system (engine/ui: UIBox, UICanvas, UIStack, UIText, UIBar, BarFill, Button)
