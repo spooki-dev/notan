@@ -4,7 +4,7 @@ local cacheManager = require "engine.cacheManager"
 local inputMap = require "engine.input.inputMap"
 local colors = require "constants.colors"
 
---- Side panel of effect toggles and sliders.
+--- Side panel of effect toggles, sliders and typed fields.
 ---
 --- Drawn by hand rather than composed from engine/ui: this is a dense column
 --- of live controls that needs pixel-exact hit testing and click-drag on the
@@ -17,11 +17,18 @@ local colors = require "constants.colors"
 --- parameters) so the mouse and the keyboard address exactly the same thing.
 --- The list is taller than a phone, so it scrolls: with the wheel, and by
 --- dragging it, which is the only gesture a touch screen has.
+---
+--- The panel is built from a list of *providers* rather than from the effect
+--- Pipeline alone. A provider is anything with a `defs` list and the three
+--- methods `getState`, `setValue` and `setEnabled`: the Pipeline is one, the
+--- crop is another. Keeping the panel ignorant of which is which is what lets
+--- the crop have ordinary rows without the panel carrying a special case for
+--- it.
 ---@class ControlPanel : GameObject
----@field pipeline Pipeline
----@field rows table[] Flattened { kind, def, param } rows in draw order
+---@field rows table[] Flattened { kind, provider, def, param } rows in draw order
 ---@field selected number Index into rows, for keyboard adjustment
 ---@field press table|nil The gesture the pointer is in the middle of
+---@field editing table|nil The field being typed into, { index, text, replacing }
 local ControlPanel = GameObject.extend(GameObject)
 
 local PANEL_WIDTH = 272
@@ -34,6 +41,12 @@ local TOP_PAD = 14
 local HEADER_H = 30
 local PARAM_H = 36
 local TOGGLE_H = 26
+--- A typed field, a computed readout and a push button. All shorter than a
+--- slider row because none of them needs a track underneath the label.
+local FIELD_H = 32
+local READOUT_H = 22
+local BUTTON_H = 28
+local FIELD_W = 58
 local TRACK_H = 6
 local BOX = 12
 local GROUP_GAP = 8
@@ -54,14 +67,15 @@ local REPEAT_DELAY = 0.3
 local REPEAT_RATE = 0.03
 
 ---@param name string Unique name within the scene
----@param pipeline Pipeline The pipeline whose state this panel edits
-function ControlPanel:new(name, pipeline)
+---@param providers table[] Objects with `defs` plus getState/setValue/setEnabled
+function ControlPanel:new(name, providers)
   ControlPanel.super.new(self, name, Vector2(0, 0), PANEL_WIDTH, love.graphics.getHeight())
   self.layer = "ui"
-  self.pipeline = pipeline
+  self.providers = providers
   self.rows = {}
   self.selected = 1
   self.press = nil
+  self.editing = nil
   self.repeatTimer = 0
   self.visible = true
   self.scroll = 0
@@ -70,10 +84,12 @@ function ControlPanel:new(name, pipeline)
   self.overlay = false
   self.windowWidth, self.windowHeight = love.graphics.getDimensions()
 
-  for _, def in ipairs(pipeline.defs) do
-    table.insert(self.rows, { kind = "effect", def = def })
-    for _, param in ipairs(def.params) do
-      table.insert(self.rows, { kind = param.kind, def = def, param = param })
+  for _, provider in ipairs(providers) do
+    for _, def in ipairs(provider.defs) do
+      table.insert(self.rows, { kind = "effect", provider = provider, def = def })
+      for _, param in ipairs(def.params) do
+        table.insert(self.rows, { kind = param.kind, provider = provider, def = def, param = param })
+      end
     end
   end
 
@@ -147,9 +163,24 @@ end
 
 --- Shows or hides the panel.
 function ControlPanel:toggleVisible()
+  self:commitEdit()
   self.visible = not self.visible
   self.press = nil
   self:layout()
+end
+
+--- Height of one row, by kind. The one place the per-kind sizes are decided,
+--- so layout, hit testing and drawing can never disagree about where a row is.
+---@param row table
+---@return number
+local function heightOf(row)
+  local kind = row.kind
+  if kind == "effect" then return HEADER_H end
+  if kind == "toggle" then return TOGGLE_H end
+  if kind == "field" then return FIELD_H end
+  if kind == "readout" then return READOUT_H end
+  if kind == "button" then return BUTTON_H end
+  return PARAM_H
 end
 
 --- Total height of the rows, including the gaps between effect groups.
@@ -160,9 +191,7 @@ function ControlPanel:contentHeight()
     if row.kind == "effect" and i > 1 then
       total = total + GROUP_GAP
     end
-    total = total + ((row.kind == "effect" and HEADER_H)
-      or (row.kind == "toggle" and TOGGLE_H)
-      or PARAM_H)
+    total = total + heightOf(row)
   end
   return total
 end
@@ -190,9 +219,7 @@ end
 function ControlPanel:rowBounds(index)
   local y = TOP_PAD - self.scroll
   for i, row in ipairs(self.rows) do
-    local h = (row.kind == "effect" and HEADER_H)
-      or (row.kind == "toggle" and TOGGLE_H)
-      or PARAM_H
+    local h = heightOf(row)
     if row.kind == "effect" and i > 1 then
       y = y + GROUP_GAP
     end
@@ -211,6 +238,16 @@ function ControlPanel:trackRect(index)
   local x = self:panelLeft() + PADDING
   local w = self.panelWidth - PADDING * 2
   return x, rowY + PARAM_H - TRACK_H - 8, w
+end
+
+--- The editable box of a typed-field row.
+---@param index number
+---@return number x, number y, number w, number h
+function ControlPanel:fieldRect(index)
+  local rowY = select(1, self:rowBounds(index))
+  local w = FIELD_W
+  local h = 20
+  return self:panelLeft() + self.panelWidth - PADDING - w, rowY + (FIELD_H - h) / 2, w, h
 end
 
 --- Snaps a value to the parameter's step and clamps it to its range.
@@ -240,7 +277,7 @@ end
 function ControlPanel:setFromTrack(row, t)
   t = math.max(0, math.min(1, t))
   local param = row.param
-  self.pipeline:setValue(row.def.id, param.key, quantise(param, param.min + t * (param.max - param.min)))
+  row.provider:setValue(row.def.id, param.key, quantise(param, param.min + t * (param.max - param.min)))
 end
 
 --- Nudges the selected parameter, or flips the selected toggle.
@@ -249,27 +286,150 @@ function ControlPanel:adjust(direction)
   local row = self.rows[self.selected]
   if not row then return end
   if row.kind == "number" then
-    local state = self.pipeline:getState(row.def.id)
+    local state = row.provider:getState(row.def.id)
     local current = state.values[row.param.key]
-    self.pipeline:setValue(row.def.id, row.param.key,
+    row.provider:setValue(row.def.id, row.param.key,
       quantise(row.param, current + direction * row.param.step))
+  elseif row.kind == "field" then
+    local state = row.provider:getState(row.def.id)
+    row.provider:setValue(row.def.id, row.param.key, state.values[row.param.key] + direction)
   elseif row.kind == "toggle" then
     self:activate()
   elseif row.kind == "effect" then
-    self.pipeline:setEnabled(row.def.id, direction > 0)
+    row.provider:setEnabled(row.def.id, direction > 0)
   end
 end
 
---- Toggles whatever the selected row represents.
+--- Toggles whatever the selected row represents, or opens a field for typing.
 function ControlPanel:activate()
   local row = self.rows[self.selected]
   if not row then return end
   if row.kind == "effect" then
-    self.pipeline:setEnabled(row.def.id, not self.pipeline:getState(row.def.id).enabled)
+    row.provider:setEnabled(row.def.id, not row.provider:getState(row.def.id).enabled)
   elseif row.kind == "toggle" then
-    local state = self.pipeline:getState(row.def.id)
-    self.pipeline:setValue(row.def.id, row.param.key,
+    local state = row.provider:getState(row.def.id)
+    row.provider:setValue(row.def.id, row.param.key,
       state.values[row.param.key] > 0.5 and 0 or 1)
+  elseif row.kind == "field" then
+    self:beginEdit(self.selected)
+  elseif row.kind == "button" then
+    row.param.action(row.provider)
+  end
+end
+
+-- Typed fields ---------------------------------------------------------------
+
+--- Whether a field is open for typing. The scene asks before acting on a key:
+--- O, G, 0 and 1 are commands everywhere except inside a field, where they
+--- are letters and digits.
+---@return boolean
+function ControlPanel:isEditing()
+  return self.editing ~= nil
+end
+
+--- Opens a field for typing. The value is shown but the first keystroke
+--- replaces it, which is what a box holding a single number should do.
+---@param index number Row index of the field
+function ControlPanel:beginEdit(index)
+  local row = self.rows[index]
+  if not row or row.kind ~= "field" then return end
+  local state = row.provider:getState(row.def.id)
+  self.selected = index
+  self.editing = {
+    index = index,
+    text = tostring(math.floor(state.values[row.param.key] + 0.5)),
+    replacing = true,
+  }
+  self:setTextInput(true, index)
+end
+
+--- Applies what was typed and closes the field. An empty or unparseable field
+--- leaves the value alone: there is no number to infer from nothing, and
+--- guessing one would be worse than ignoring it.
+function ControlPanel:commitEdit()
+  local editing = self.editing
+  if not editing then return end
+  self.editing = nil
+  self:setTextInput(false)
+  local row = self.rows[editing.index]
+  if not row then return end
+  local value = tonumber(editing.text)
+  if value then
+    row.provider:setValue(row.def.id, row.param.key, value)
+  end
+end
+
+--- Closes the field, throwing away what was typed.
+function ControlPanel:cancelEdit()
+  if not self.editing then return end
+  self.editing = nil
+  self:setTextInput(false)
+end
+
+--- Commits the open field and opens the next one, wrapping round. Tabbing
+--- between the two is how a width and a height get entered in one go.
+function ControlPanel:editNextField()
+  local from = self.editing and self.editing.index or self.selected
+  self:commitEdit()
+  for offset = 1, #self.rows do
+    local index = ((from - 1 + offset) % #self.rows) + 1
+    if self.rows[index].kind == "field" then
+      self:beginEdit(index)
+      self:revealSelected()
+      return
+    end
+  end
+end
+
+--- Raises or dismisses the on-screen keyboard, telling the OS where the field
+--- is so it can scroll it clear of its own keys. Guarded: love.js is the least
+--- dependable consumer of this, and a missing keyboard must not take the whole
+--- app down with it.
+---@param on boolean
+---@param index number|nil Row index of the field, when switching on
+function ControlPanel:setTextInput(on, index)
+  if not love.keyboard.setTextInput then return end
+  if on and index then
+    local fx, fy, fw, fh = self:fieldRect(index)
+    pcall(love.keyboard.setTextInput, true,
+      math.floor(fx), math.floor(fy), math.floor(fw), math.floor(fh))
+  else
+    pcall(love.keyboard.setTextInput, false)
+  end
+end
+
+--- Engine hook: typed text. Digits only, and few of them -- the field holds
+--- the side of a panel, not an essay.
+---@param text string
+function ControlPanel:onTextInput(text)
+  local editing = self.editing
+  if not editing then return end
+  for i = 1, #text do
+    local char = text:sub(i, i)
+    if char >= "0" and char <= "9" then
+      if editing.replacing then
+        editing.text = ""
+        editing.replacing = false
+      end
+      if #editing.text < 4 then
+        editing.text = editing.text .. char
+      end
+    end
+  end
+end
+
+--- Engine hook: a raw key. Only the two a field needs that are not actions.
+--- Enter and Escape arrive as ui_accept and ui_cancel instead, so they work
+--- from a gamepad, and so neither can commit on one frame and then fire again
+--- as a row activation on the next.
+---@param key string
+function ControlPanel:onKeyPressed(key)
+  if not self.editing then return end
+  if key == "backspace" then
+    self.editing.replacing = false
+    self.editing.text = self.editing.text:sub(1, -2)
+  elseif key == "tab" then
+    self:editNextField()
   end
 end
 
@@ -279,14 +439,22 @@ end
 ---@param row table
 ---@return function
 function ControlPanel:undoFor(row)
-  local state = self.pipeline:getState(row.def.id)
+  local state = row.provider:getState(row.def.id)
   if row.kind == "effect" then
     local enabled = state.enabled
-    return function() self.pipeline:setEnabled(row.def.id, enabled) end
+    return function() row.provider:setEnabled(row.def.id, enabled) end
   end
+  -- The press opened this field; a flick of the list was never a request to
+  -- type into it, so put it away again.
+  if row.kind == "field" then
+    return function() self:cancelEdit() end
+  end
+  -- A readout changes nothing and a button has already run, so neither has
+  -- anything to put back.
+  if not row.param or not row.param.key then return nil end
   local key = row.param.key
   local value = state.values[key]
-  return function() self.pipeline:setValue(row.def.id, key, value) end
+  return function() row.provider:setValue(row.def.id, key, value) end
 end
 
 --- Moves the keyboard selection, wrapping at both ends.
@@ -315,6 +483,17 @@ end
 ---@param name string
 function ControlPanel:onActionPressed(name)
   if not self.visible then return end
+  -- An open field swallows the menu actions: Enter commits it, Escape
+  -- abandons it, and nothing else may move the selection out from under what
+  -- is being typed.
+  if self.editing then
+    if name == "ui_accept" then
+      self:commitEdit()
+    elseif name == "ui_cancel" then
+      self:cancelEdit()
+    end
+    return
+  end
   if name == "ui_down" then
     self:moveSelection(1)
   elseif name == "ui_up" then
@@ -349,6 +528,13 @@ function ControlPanel:onMouseDown(x, y, button)
   end
   if not self.visible then return end
 
+  -- A press anywhere but the field being typed into finishes it, the way
+  -- clicking out of a field does everywhere else.
+  if self.editing then
+    local editY, editH = self:rowBounds(self.editing.index)
+    if y < editY or y >= editY + editH then self:commitEdit() end
+  end
+
   local top, bottom = TOP_PAD, TOP_PAD + self:viewHeight()
   for i, row in ipairs(self.rows) do
     local rowY, rowH = self:rowBounds(i)
@@ -364,7 +550,7 @@ function ControlPanel:onMouseDown(x, y, button)
       if row.kind == "number" then
         local trackX, _, trackW = self:trackRect(i)
         self:setFromTrack(row, (x - trackX) / trackW)
-      else
+      elseif row.kind ~= "readout" then
         self:activate()
       end
       return
@@ -418,7 +604,12 @@ function ControlPanel:update(dt)
     end
   end
 
-  local held = (inputMap.down("ui_left") and -1) or (inputMap.down("ui_right") and 1) or nil
+  -- Left and right are a nudge on a slider, but they belong to the field
+  -- while one is open, where they must not run away with the value.
+  local held = nil
+  if not self.editing then
+    held = (inputMap.down("ui_left") and -1) or (inputMap.down("ui_right") and 1) or nil
+  end
   if held then
     self.repeatTimer = self.repeatTimer + dt
     while self.repeatTimer >= REPEAT_RATE do
@@ -481,7 +672,7 @@ function ControlPanel:draw()
   love.graphics.setScissor(x, TOP_PAD, width, self:viewHeight())
   for i, row in ipairs(self.rows) do
     local rowY, rowH = self:rowBounds(i)
-    local state = self.pipeline:getState(row.def.id)
+    local state = row.provider:getState(row.def.id)
     local isSelected = i == self.selected
     local isLive = state.enabled
 
@@ -518,6 +709,54 @@ function ControlPanel:draw()
         love.graphics.setColor(1, 1, 1, isLive and 0.4 or 0.2)
       end
       love.graphics.rectangle("fill", on and (pillX + pillW - pillH) or pillX, pillY, pillH, pillH, 3, 3)
+    elseif row.kind == "field" then
+      local typing = self.editing ~= nil and self.editing.index == i
+      love.graphics.setFont(small)
+      love.graphics.setColor(1, 1, 1, isLive and 0.75 or 0.3)
+      love.graphics.print(row.param.label, x + PADDING + BOX + 10,
+        rowY + (rowH - small:getHeight()) / 2)
+
+      local fx, fy, fw, fh = self:fieldRect(i)
+      love.graphics.setColor(1, 1, 1, isLive and 0.1 or 0.05)
+      love.graphics.rectangle("fill", fx, fy, fw, fh, 3, 3)
+      if typing then
+        love.graphics.setColor(colors.yellow[1], colors.yellow[2], colors.yellow[3], 0.9)
+      else
+        love.graphics.setColor(1, 1, 1, isLive and 0.22 or 0.1)
+      end
+      love.graphics.rectangle("line", fx + 0.5, fy + 0.5, fw - 1, fh - 1, 3, 3)
+
+      -- While typing the text makes room for a caret, so an emptied field
+      -- still shows where the next digit lands instead of looking dead.
+      local text = typing and self.editing.text or formatValue(row.param, state.values[row.param.key])
+      local right = fx + fw - (typing and 12 or 7)
+      love.graphics.setColor(1, 1, 1, isLive and 0.95 or 0.4)
+      love.graphics.print(text, right - small:getWidth(text), fy + (fh - small:getHeight()) / 2)
+      if typing and (love.timer.getTime() % 1) < 0.6 then
+        love.graphics.setColor(colors.yellow[1], colors.yellow[2], colors.yellow[3], 1)
+        love.graphics.rectangle("fill", right + 2, fy + 4, 1, fh - 8)
+      end
+    elseif row.kind == "readout" then
+      love.graphics.setFont(small)
+      love.graphics.setColor(1, 1, 1, isLive and 0.45 or 0.22)
+      love.graphics.print(row.param.label, x + PADDING + BOX + 10,
+        rowY + (rowH - small:getHeight()) / 2)
+      local text = row.param.text(row.provider)
+      love.graphics.setColor(1, 1, 1, isLive and 0.8 or 0.3)
+      love.graphics.print(text, x + width - PADDING - small:getWidth(text),
+        rowY + (rowH - small:getHeight()) / 2)
+    elseif row.kind == "button" then
+      love.graphics.setFont(small)
+      local bh = 20
+      local bw = small:getWidth(row.param.label) + 20
+      local bx = x + width - PADDING - bw
+      local by = rowY + (rowH - bh) / 2
+      love.graphics.setColor(1, 1, 1, isLive and 0.12 or 0.06)
+      love.graphics.rectangle("fill", bx, by, bw, bh, 3, 3)
+      love.graphics.setColor(1, 1, 1, isLive and 0.18 or 0.09)
+      love.graphics.rectangle("line", bx + 0.5, by + 0.5, bw - 1, bh - 1, 3, 3)
+      love.graphics.setColor(1, 1, 1, isLive and 0.8 or 0.3)
+      love.graphics.print(row.param.label, bx + 10, by + (bh - small:getHeight()) / 2)
     else
       local value = state.values[row.param.key]
       love.graphics.setFont(small)

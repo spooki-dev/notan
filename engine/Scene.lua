@@ -37,6 +37,7 @@ function Scene:new(name)
   self.clickGameObjects = {}
   self.scrollGameObjects = {}
   self.keyGameObjects = {}    -- objects defining onKeyPressed
+  self.textGameObjects = {}   -- objects defining onTextInput
   self.actionGameObjects = {} -- objects defining onActionPressed / onActionReleased
   self.layers = {}
   self.layerOrder = {}
@@ -133,6 +134,9 @@ function Scene:addGameObject(gameObject)
   end
   if gameObject.onKeyPressed then
     self.keyGameObjects[gameObject.name] = gameObject
+  end
+  if gameObject.onTextInput then
+    self.textGameObjects[gameObject.name] = gameObject
   end
   if gameObject.onActionPressed or gameObject.onActionReleased then
     self.actionGameObjects[gameObject.name] = gameObject
@@ -292,6 +296,10 @@ function Scene:removeGameObject(gameObject)
     self.keyGameObjects[gameObject.name] = nil
   end
 
+  if self.textGameObjects and gameObject.name and self.textGameObjects[gameObject.name] == gameObject then
+    self.textGameObjects[gameObject.name] = nil
+  end
+
   if self.actionGameObjects and gameObject.name and self.actionGameObjects[gameObject.name] == gameObject then
     self.actionGameObjects[gameObject.name] = nil
   end
@@ -346,6 +354,25 @@ end
 function Scene:keyreleased(key, scancode)
   if self.onKeyReleased then
     self:onKeyReleased(key, scancode)
+  end
+end
+
+--- Text the player typed, already composed by the OS (so an accented letter or
+--- an on-screen keyboard arrives as one string). Calls the optional scene hook
+--- `onTextInput(text)` then every active object that defines `onTextInput`.
+---
+--- This is separate from keypressed on purpose: keys are for commands and
+--- arrive as scancodes on a physical layout, text is for typing and arrives as
+--- characters. A field editing a number wants the latter.
+--- @param text string The typed text, in UTF-8
+function Scene:textinput(text)
+  if self.onTextInput then
+    self:onTextInput(text)
+  end
+  for _, gameObject in pairs(self.textGameObjects) do
+    if gameObject.active then
+      gameObject:onTextInput(text)
+    end
   end
 end
 

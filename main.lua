@@ -59,6 +59,7 @@ Game({
       { name = "fit_view",        label = "Fit to window",  category = "View",    bindings = { "key:0", "pad:leftstick" } },
       { name = "actual_size",     label = "Actual size",    category = "View",    bindings = { "key:1" } },
       { name = "toggle_panel",    label = "Hide panel",     category = "View",    bindings = { "key:h", "pad:back" } },
+      { name = "toggle_crop",     label = "Toggle crop",    category = "View",    bindings = { "key:k" } },
       { name = "toggle_grid",     label = "Toggle grid",    category = "Effects", bindings = { "key:g", "pad:rightshoulder" } },
       { name = "reset_effects",   label = "Reset effects",  category = "Effects", bindings = { "key:r" } },
       { name = "open_controls",   label = "Key bindings",   category = "System",  bindings = { "key:c", "pad:start" } },
