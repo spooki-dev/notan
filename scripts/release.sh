@@ -21,7 +21,7 @@ UTI=com.spooki.notan
 AUTHOR="George Butter"
 REPO=spooki-dev/notan
 # Bump for every release; the tag is v$VERSION and gh refuses an existing one.
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-0.2.0}"
 LOVE=/Applications/love.app/Contents/MacOS/love
 # Mac/Windows packages are built here from the official runtime zips for the
 # version the game targets.
