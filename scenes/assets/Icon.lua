@@ -1,11 +1,9 @@
 local Scene = require "engine.Scene"
 local colors = require "constants.colors"
-local Vector4 = require "engine.Vector4"
-local UICanvas = require "engine.ui.UICanvas"
-local UIBox = require "engine.ui.UIBox"
-local Wordmark = require "gameObjects.Wordmark"
+local NotanMark = require "gameObjects.NotanMark"
 
---- Square app icon (1024x1024): framed three-line wordmark. Source for the .icns and .ico.
+--- Square app icon (1024x1024): the Notan mark, full bleed. Source for the
+--- .icns and the .ico.
 --- Constructed by engine/AssetExporter.lua with the target pixel size.
 ---@class AssetIcon : Scene
 local AssetIcon = Scene.extend(Scene)
@@ -20,23 +18,9 @@ function AssetIcon:new(width, height)
 end
 
 function AssetIcon:load()
-  local inset = 64
-  local border = 32
-  local innerHeight = self.height - inset * 2
-  self:addGameObject(UICanvas("AssetIconUI", {
-    UIBox("AssetIconFrame", {
-      Wordmark("AssetIconMark", {
-        lines = { "NOTAN" },
-        titleSize = 96,
-        canvasHeight = innerHeight - border * 2,
-      }),
-    }, {
-      height = innerHeight - border * 2,
-      border = Vector4(border, border, border, border),
-      borderColor = colors.vec4Green,
-      padding = Vector4(border, border, border, border),
-    }),
-  }, { width = self.width, height = self.height, padding = Vector4(inset, inset, inset, inset) }))
+  -- Full bleed: macOS and Windows both put the icon in a frame of their own,
+  -- and an inset frame of ours only shrinks the mark inside it.
+  self:addGameObject(NotanMark("AssetIconMark", math.min(self.width, self.height)))
 end
 
 return AssetIcon

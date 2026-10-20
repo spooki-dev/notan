@@ -8,7 +8,9 @@ local sceneManager = require "engine.sceneManager"
 ---   { name = "icon", scene = IconScene, width = 1024, height = 1024,
 ---     transparent = false, postProcess = false }
 --- `scene` is a Scene constructor called as `ctor(width, height)`, or the
---- name of a scene already registered with sceneManager.
+--- name of a scene already registered with sceneManager. An item may set its
+--- own `outputDir`, relative to the project root, which is how an asset the
+--- game itself loads at runtime lands somewhere that ships inside the .love.
 local AssetExporter = {}
 
 ---@class AssetItem
@@ -18,6 +20,7 @@ local AssetExporter = {}
 ---@field height number Output height in pixels
 ---@field transparent boolean|nil Clear to transparent instead of the scene background
 ---@field postProcess boolean|nil Run the post-processing shader chain over the result
+---@field outputDir string|nil Write this one asset elsewhere, relative to the project root
 
 ---@class AssetConfig
 ---@field outputDir string|nil Directory relative to the project root (default "assets/generated")
@@ -92,9 +95,17 @@ end
 ---@param postProcessing PostProcessing|nil
 function AssetExporter.export(assets, outputDir, postProcessing)
   assert(type(assets) == "table" and type(assets.items) == "table", "AssetExporter: assets.items must be a table")
-  os.execute(string.format('mkdir -p "%s"', outputDir))
+  local root = love.filesystem.getSource()
+  local made = {}
   for _, asset in ipairs(assets.items) do
-    local path = outputDir .. "/" .. asset.name .. ".png"
+    -- A per-item directory is relative to the project root, the same way the
+    -- shared one is resolved by the caller.
+    local dir = asset.outputDir and (root .. "/" .. asset.outputDir) or outputDir
+    if not made[dir] then
+      os.execute(string.format('mkdir -p "%s"', dir))
+      made[dir] = true
+    end
+    local path = dir .. "/" .. asset.name .. ".png"
     writePng(AssetExporter.render(asset, postProcessing), path)
     print(string.format("exported %s (%dx%d)", path, asset.width, asset.height))
   end
