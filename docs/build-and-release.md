@@ -75,9 +75,9 @@ The script runs with `set -euo pipefail` from the repo root and uses a temporary
 3. **Check the `.love`.** Unzips it, runs `scripts/lint-lua51.sh` over every `.lua` inside, then `scripts/check-requires.sh` over the unpacked tree.
 4. **Fetch runtimes.** Downloads `love-11.5-macos.zip`, `love-11.5-win32.zip` and `love-11.5-win64.zip` from the LÖVE GitHub releases into `~/.cache/love-release/` if not already cached.
 5. **Build `.icns`.** Resizes `icon.png` with `sips` to 16 through 512 plus `@2x` variants and runs `iconutil -c icns`.
-6. **Package macOS.** Renames `love.app` to `<TITLE>.app`, copies the `.love` into `Contents/Resources/`, writes the `.icns` as `OS X AppIcon.icns` and `GameIcon.icns`, sets `CFBundleIdentifier`, `CFBundleName` and `CFBundleDisplayName`, removes `CFBundleIconName` and `UTExportedTypeDeclarations`, and ad-hoc signs with `codesign --force --deep --sign -`.
-7. **Build the `.dmg`.** `ditto`s the signed `.app` into a staging folder next to an `/Applications` symlink and runs `hdiutil create -format UDZO` over it, producing `<TITLE>-macos.dmg`.
-8. **Package Windows.** Runs `npm install` in `scripts/`, resizes `icon.png` to 16 through 256, builds a `.ico` with `node scripts/png-to-ico.mjs`, and for each of `win32` and `win64` patches the icon into `love.exe` with `node scripts/patch-win-icon.mjs`, appends the `.love` to the exe as `<PKG>.exe`, removes `love.exe`, `lovec.exe`, the readmes and the stock `.ico` files, then runs `makensis` over `scripts/windows-installer.nsi` to produce `<TITLE>-win32-setup.exe` and `<TITLE>-win64-setup.exe`.
+6. **Package macOS.** Renames `love.app` to `<TITLE>.app`, copies the `.love` into `Contents/Resources/`, writes the `.icns` as `OS X AppIcon.icns` and `GameIcon.icns`, sets `CFBundleIdentifier`, `CFBundleName` and `CFBundleDisplayName`, removes `CFBundleIconName` and `UTExportedTypeDeclarations`, and signs the bundle — ad-hoc with `codesign --force --deep --sign -`, or for Developer ID and notarized when the signing variables are set.
+7. **Build the `.dmg`.** `ditto`s the signed `.app` into a staging folder next to an `/Applications` symlink, runs `hdiutil create -format UDZO` over it to produce `<TITLE>-macos.dmg`, and signs that too.
+8. **Package Windows.** Runs `npm install` in `scripts/`, resizes `icon.png` to 16 through 256, builds a `.ico` with `node scripts/png-to-ico.mjs`, and for each of `win32` and `win64` patches the icon into `love.exe` with `node scripts/patch-win-icon.mjs`, appends the `.love` to the exe as `<PKG>.exe`, removes `love.exe`, `lovec.exe`, the readmes and the stock `.ico` files, then runs `makensis` over `scripts/windows-installer.nsi` to produce `<TITLE>-win32-setup.exe` and `<TITLE>-win64-setup.exe`. The game exe is signed after the `.love` is appended and the installer after it is built, when `WINDOWS_SIGN_HOOK` is set.
 9. **Publish** (skipped with `--no-push`). `gh release create v$VERSION` on `$REPO` with the `.dmg`, both installers and the `.love` attached, then opens the release page.
 10. **Checklist.** Prints where the builds landed and the marketing art you may want for the page.
 
@@ -114,7 +114,7 @@ scripts/check-requires.sh some/dir    # ...or against an unpacked .love
 - Mac and Windows packages are assembled from the official 11.5 runtime zips rather than by a packaging tool, so the shipped runtime is exactly the version the game targets.
 - The Windows icon is replaced inside the PE resource table by `scripts/patch-win-icon.mjs` (`node scripts/patch-win-icon.mjs <in.exe> <out.exe> <png> [<png>...]`), pure JavaScript via `pe-library` and `resedit`, so no Windows tooling is needed on macOS. The `.love` is then appended to the exe, which is how LÖVE finds a fused game.
 - The Mac icon is an `.icns` built with `iconutil`. With `CFBundleIconName` present macOS reads the icon from `Assets.car`, so the script removes that key.
-- Signing is ad-hoc; a failure prints a warning and continues.
+- Signing is ad-hoc by default; a failure prints a warning and continues. Set `MACOS_SIGN_IDENTITY`, `MACOS_NOTARY_PROFILE` and `WINDOWS_SIGN_HOOK` to sign for real — see `code-signing.md`.
 
 ## The downloads
 

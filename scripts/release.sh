@@ -33,6 +33,95 @@ SHA=$(git rev-parse --short HEAD)
 PUSH=1
 [[ "${1:-}" == "--no-push" ]] && PUSH=0
 
+# Code signing. All three are empty by default, and an unset one means the
+# step is skipped: the build still works, it just arrives as an unidentified
+# developer. docs/code-signing.md covers what each one costs to obtain.
+#
+#   MACOS_SIGN_IDENTITY   "Developer ID Application: Name (TEAMID)"
+#   MACOS_NOTARY_PROFILE  a profile from `xcrun notarytool store-credentials`
+#   WINDOWS_SIGN_HOOK     an executable taking one path, signing it in place
+MACOS_SIGN_IDENTITY="${MACOS_SIGN_IDENTITY:-}"
+MACOS_NOTARY_PROFILE="${MACOS_NOTARY_PROFILE:-}"
+WINDOWS_SIGN_HOOK="${WINDOWS_SIGN_HOOK:-}"
+ENTITLEMENTS=scripts/macos-entitlements.plist
+# Checked here rather than at the notarization step, which is a minute into the
+# build: Apple will not notarize an ad-hoc build, so the pairing is wrong from
+# the start.
+[[ -z "$MACOS_NOTARY_PROFILE" || -n "$MACOS_SIGN_IDENTITY" ]] \
+  || { echo "MACOS_NOTARY_PROFILE needs MACOS_SIGN_IDENTITY: Apple only notarizes Developer ID builds" >&2; exit 1; }
+[[ -z "$WINDOWS_SIGN_HOOK" || -x "$WINDOWS_SIGN_HOOK" ]] \
+  || { echo "WINDOWS_SIGN_HOOK is not executable: $WINDOWS_SIGN_HOOK" >&2; exit 1; }
+
+# Signs an .app for Developer ID, or ad-hoc when no identity is configured.
+# Nested Mach-O code is signed first: `--deep` is deprecated, and it does not
+# apply the entitlements the hardened runtime needs anyway.
+sign_macos_app() {
+  local app=$1
+  if [[ -z "$MACOS_SIGN_IDENTITY" ]]; then
+    codesign --force --deep --sign - "$app" 2>/dev/null \
+      || echo "warning: ad-hoc codesign failed" >&2
+    return 0
+  fi
+  [[ -f "$ENTITLEMENTS" ]] || { echo "missing $ENTITLEMENTS" >&2; exit 1; }
+  local inner
+  while IFS= read -r inner; do
+    codesign --force --timestamp --options runtime \
+      --sign "$MACOS_SIGN_IDENTITY" "$inner"
+  done < <(find "$app/Contents" -type f \( -name '*.dylib' -o -name '*.so' \) 2>/dev/null)
+  while IFS= read -r inner; do
+    codesign --force --timestamp --options runtime \
+      --sign "$MACOS_SIGN_IDENTITY" "$inner"
+  done < <(find "$app/Contents/Frameworks" -maxdepth 1 -name '*.framework' 2>/dev/null)
+  codesign --force --timestamp --options runtime \
+    --entitlements "$ENTITLEMENTS" --sign "$MACOS_SIGN_IDENTITY" "$app"
+  codesign --verify --strict --verbose=2 "$app"
+}
+
+# The .dmg gets a signature of its own, so the download is identified before
+# anything is mounted. No entitlements and no hardened runtime: it is not code.
+sign_macos_dmg() {
+  local dmg=$1
+  if [[ -z "$MACOS_SIGN_IDENTITY" ]]; then
+    codesign --force --sign - "$dmg" 2>/dev/null \
+      || echo "warning: ad-hoc codesign of the dmg failed" >&2
+    return 0
+  fi
+  codesign --force --timestamp --sign "$MACOS_SIGN_IDENTITY" "$dmg"
+}
+
+# Submits to Apple and staples the ticket, so a first launch works offline.
+# Notarization takes an archive, but the ticket staples to the thing inside it,
+# which is why the caller says what to submit and what to staple separately.
+notarize_macos() {
+  local target=$1 archive=$2
+  [[ -n "$MACOS_NOTARY_PROFILE" ]] || return 0
+  step "Notarize $(basename "$target")"
+  xcrun notarytool submit "$archive" --keychain-profile "$MACOS_NOTARY_PROFILE" --wait
+  xcrun stapler staple "$target"
+  xcrun stapler validate "$target"
+}
+
+# The .app goes up inside a throwaway zip, because notarytool will not take a
+# bundle. Stapling it here is what makes the copy inside the .dmg built
+# afterwards already carry its ticket.
+notarize_macos_app() {
+  local app=$1
+  [[ -n "$MACOS_NOTARY_PROFILE" ]] || return 0
+  local archive="$WORK/notarize-app.zip"
+  rm -f "$archive"
+  (cd "$(dirname "$app")" && zip -qry "$archive" "$(basename "$app")")
+  notarize_macos "$app" "$archive"
+}
+
+# Authenticode, through whatever tooling the certificate needs. Every CA and
+# cloud signing service drives this differently, so the script only knows the
+# shape: one executable, one path, signed in place.
+sign_windows() {
+  local target=$1
+  [[ -n "$WINDOWS_SIGN_HOOK" ]] || return 0
+  "$WINDOWS_SIGN_HOOK" "$target"
+}
+
 for tool in "$LOVE" iconutil sips plutil codesign hdiutil makensis zip unzip curl node npm gh; do
   command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }
 done
@@ -102,7 +191,8 @@ plutil -replace CFBundleDisplayName -string "$TITLE" "$PLIST" 2>/dev/null || tru
 # With CFBundleIconName present macOS reads the icon from Assets.car, not the .icns.
 plutil -remove CFBundleIconName "$PLIST" 2>/dev/null || true
 plutil -remove UTExportedTypeDeclarations "$PLIST" 2>/dev/null || true
-codesign --force --deep --sign - "$APP" 2>/dev/null || echo "warning: ad-hoc codesign failed" >&2
+sign_macos_app "$APP"
+notarize_macos_app "$APP"
 
 step "Build the .dmg"
 # A disk image rather than a zip: it mounts on double-click and the
@@ -114,7 +204,10 @@ mkdir -p "$STAGE"
 ditto "$APP" "$STAGE/$TITLE.app"   # ditto, not cp: keeps the signature intact
 ln -s /Applications "$STAGE/Applications"
 hdiutil create -quiet -volname "$TITLE" -srcfolder "$STAGE" -ov -format UDZO -fs HFS+ "$DMG"
-codesign --force --sign - "$DMG" 2>/dev/null || echo "warning: ad-hoc codesign of the dmg failed" >&2
+sign_macos_dmg "$DMG"
+# The app inside was stapled before it was copied in, so this second trip is
+# only about the disk image itself; notarytool takes a .dmg as it is.
+notarize_macos "$DMG" "$DMG"
 
 step "Package Windows installers"
 (cd scripts && npm install --silent --no-audit --no-fund)
@@ -133,23 +226,36 @@ for arch in 32 64; do
   # directory record, which is how LÖVE finds a fused game.
   cat "$DIR/love-icon.exe" "$LOVEFILE" > "$SRC/$PKG.exe"
   rm -f "$SRC/love.exe" "$SRC/lovec.exe" "$SRC/readme.txt" "$SRC/changes.txt" "$SRC/love.ico" "$SRC/game.ico"
+  # Sign after the .love is appended: anything added to the file afterwards
+  # falls outside the signature and invalidates it.
+  sign_windows "$SRC/$PKG.exe"
   # An installer rather than a folder in a zip: the game needs its DLLs
   # beside it, and a zip asks a beginner to understand that before it will
   # run. NSIS cross-builds from macOS; see scripts/windows-installer.nsi for
   # why the install is per-user.
+  SETUP="$PWD/$OUT/$TITLE-win$arch-setup.exe"
   makensis -V2 \
     "-DTITLE=$TITLE" "-DPKG=$PKG" "-DVERSION=$VERSION" "-DARCH=$arch" \
     "-DSRCDIR=$SRC" "-DICON=$WORK/$PKG.ico" \
-    "-DOUTFILE=$PWD/$OUT/$TITLE-win$arch-setup.exe" \
+    "-DOUTFILE=$SETUP" \
     scripts/windows-installer.nsi
+  # The installer is the thing SmartScreen actually judges, so it is signed
+  # too; the exe inside it is signed separately above for after it is unpacked.
+  sign_windows "$SETUP"
 done
+
+if [[ -n "$MACOS_SIGN_IDENTITY" && -n "$WINDOWS_SIGN_HOOK" ]]; then
+  RELEASE_NOTES="Built from $SHA."
+else
+  RELEASE_NOTES="Built from $SHA. The macOS app and the Windows installers are unsigned: see the install notes at https://spookidev.com/notan#install."
+fi
 
 if [[ $PUSH -eq 1 ]]; then
   step "Publish release v$VERSION to $REPO"
   gh release create "v$VERSION" \
     --repo "$REPO" \
     --title "$TITLE $VERSION" \
-    --notes "Built from $SHA. The macOS app and the Windows installers are unsigned: see the install notes at https://spookidev.com/notan#install." \
+    --notes "$RELEASE_NOTES" \
     "$DMG#$TITLE for macOS (.dmg)" \
     "$OUT/$TITLE-win64-setup.exe#$TITLE for Windows, 64-bit (installer)" \
     "$OUT/$TITLE-win32-setup.exe#$TITLE for Windows, 32-bit (installer)" \
@@ -159,9 +265,17 @@ else
   step "Skipping the GitHub release (--no-push)"
 fi
 
+signing_state() {
+  [[ -n "$MACOS_SIGN_IDENTITY" ]] || { echo "ad-hoc (unidentified developer)"; return; }
+  [[ -n "$MACOS_NOTARY_PROFILE" ]] && echo "Developer ID, notarized" || echo "Developer ID, NOT notarized"
+}
+
 cat <<MSG
 
 Builds are in $OUT/.
+
+Signing: macOS $(signing_state); Windows $([[ -n "$WINDOWS_SIGN_HOOK" ]] && echo "signed via $WINDOWS_SIGN_HOOK" || echo "unsigned").
+See docs/code-signing.md to change that.
 
 The download buttons on https://spookidev.com/notan point at
 https://github.com/$REPO/releases/latest/download/<file>, which GitHub

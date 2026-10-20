@@ -25,6 +25,7 @@ There is no lint or test command. Verify by running the app (`love . path/to/pho
 - Saves go through `engine/saveManager` (single slot, Lua-source file in the save dir, never throws; `version` + optional `migrate`). The engine only stores the table it is given. `Game:quit` calls the current scene's optional `onQuit()`; `sceneManager.resetScene`/`addScene` return the instance and `getScene(name)` looks one up. Keep `t.identity` set in `conf.lua`.
 - Assets/fonts must be preloaded through `engine/cacheManager` (see `scenes/Preload.lua`) before use. Font keys `header`, `subheader`, `body`, `small` and cursor keys `default`, `active` are contracts relied on by `engine/ui`.
 - Marketing art in `assets/generated/` is rendered by `love . --export-assets` from `scenes/assets/*.lua` (engine side: `engine/AssetExporter.lua`); `scripts/release.sh` runs that, builds every platform and publishes a GitHub release. Do not hand-edit the generated PNGs.
+- Builds are ad-hoc signed. `scripts/release.sh` signs for real only when `MACOS_SIGN_IDENTITY`, `MACOS_NOTARY_PROFILE` or `WINDOWS_SIGN_HOOK` are set; `docs/code-signing.md` covers what those need and why the hardened runtime requires `scripts/macos-entitlements.plist` (LuaJIT).
 - `constants/colors.lua` exports decimal `{r,g,b}` tables (`black`, `dark`, `light`, `white`, `green`) plus `vec4*` variants; UI code passes `Vector4(r,g,b,a)`.
 
 ## UI system (engine/ui: UIBox, UICanvas, UIStack, UIText, UIBar, BarFill, Button)

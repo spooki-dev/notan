@@ -55,4 +55,6 @@ Downloads are a macOS `.dmg` (drag to Applications), a Windows installer `.exe` 
 
 `scripts/love-filelist.sh` decides what goes inside the `.love`, and `scripts/check-requires.sh` proves every `require` and asset path in it resolves against that list — run on every push by `.github/workflows/ci.yml`, because a module missing from the package never shows up in the working tree.
 
+Builds are ad-hoc signed, so macOS and Windows both warn that the developer is unknown. `docs/code-signing.md` is the write-up of what fixes that — Apple Developer ID plus notarization, Windows Authenticode — and `scripts/release.sh` already reads `MACOS_SIGN_IDENTITY`, `MACOS_NOTARY_PROFILE` and `WINDOWS_SIGN_HOOK` for when the certificates exist.
+
 See `CLAUDE.md` for the architecture and engine contracts, and `AGENTS.md` for the short version.
