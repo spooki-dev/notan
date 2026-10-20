@@ -42,6 +42,7 @@ Game({
 | Field | Type | Required | Meaning |
 |---|---|---|---|
 | `title` | string | yes | Window title, applied with `love.window.setTitle` in `Game:load`. |
+| `icon` | string | no | Window icon, a path inside the game source, applied with `love.window.setIcon` in `Game:load`. A missing file prints a line and keeps the LÖVE default. |
 | `env` | string | no | `"dev"` turns on hot reload and the MCP bridge. Anything else runs clean. |
 | `scenes` | array of Scene constructors | yes, non-empty | Registered in order with `sceneManager.addScene`, which instantiates each and runs its `load()` immediately. `Preload` must be first. |
 | `defaultScene` | string | yes | Scene name made current after registration. |
