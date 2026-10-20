@@ -54,7 +54,7 @@ The password is an app-specific password from appleid.apple.com, not the Apple I
 
 ### Stapling
 
-The ticket is attached to the **bundle**, not to a zip, so the archive has to be rebuilt around the stapled `.app` afterwards; `release.sh` does that. (A `.dmg` can be stapled directly.) Stapling is what makes the first launch work on a machine that is offline — without it, Gatekeeper has to reach Apple to check.
+The ticket is attached to the **bundle**, not to the archive it was submitted in. `notarytool` will not take a bundle, so `release.sh` zips the `.app` into a throwaway archive, submits that, and staples the ticket to the `.app`. The `.dmg` is built afterwards from the already-stapled app and submitted as itself, since a `.dmg` can be stapled directly. Stapling is what makes the first launch work on a machine that is offline — without it, Gatekeeper has to reach Apple to check.
 
 ### In CI
 
@@ -95,7 +95,7 @@ The reason indie developers used to pay the EV premium was an immediate SmartScr
 
 ### What to sign, and when
 
-Every exe that ships: the game exe, and the installer if there is one. Order matters twice over:
+Every exe that ships: the game exe, and the installer that carries it. Order matters twice over:
 
 - The `.love` is **appended** to `love.exe` to make the game exe. Sign after that, never before — anything added to a PE after signing falls outside the signature and invalidates it.
 - An installer must be built from already-signed files and then signed itself, or the files it lays down on disk are unsigned.
@@ -112,9 +112,9 @@ Nothing to do. It is not executable on its own; whoever runs it already has LÖV
 
 | Variable | Example | Effect |
 |---|---|---|
-| `MACOS_SIGN_IDENTITY` | `Developer ID Application: George Butter (AB12CD34EF)` | Signs the bundle inside out with the hardened runtime and `scripts/macos-entitlements.plist`, then verifies it. Unset, the app is ad-hoc signed as before. |
-| `MACOS_NOTARY_PROFILE` | `notan-notary` | Submits the archive with `notarytool --wait`, staples the ticket to the `.app` and rebuilds the archive around it. Requires `MACOS_SIGN_IDENTITY`; the script stops if it is set without one, because Apple will not notarize an ad-hoc build. |
-| `WINDOWS_SIGN_HOOK` | `scripts/sign-windows.sh` | An executable taking one argument, a file to sign in place. Called on each `<PKG>.exe` after the `.love` is appended. |
+| `MACOS_SIGN_IDENTITY` | `Developer ID Application: George Butter (AB12CD34EF)` | Signs the bundle inside out with the hardened runtime and `scripts/macos-entitlements.plist`, then verifies it, and signs the `.dmg` too. Unset, both are ad-hoc signed as before. |
+| `MACOS_NOTARY_PROFILE` | `notan-notary` | Submits with `notarytool --wait` and staples the ticket, twice: the `.app` before the disk image is built, then the `.dmg` itself. Requires `MACOS_SIGN_IDENTITY`; the script stops if it is set without one, because Apple will not notarize an ad-hoc build. |
+| `WINDOWS_SIGN_HOOK` | `scripts/sign-windows.sh` | An executable taking one argument, a file to sign in place. Called on each `<PKG>.exe` after the `.love` is appended, and again on the installer `.exe` that NSIS builds around it. |
 
 A release with everything set:
 

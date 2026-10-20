@@ -29,6 +29,10 @@ Game({
   -- Registered in order; Preload must come first because addScene runs load() immediately.
   scenes = { Preload, Viewer, Controls },
   defaultScene = "Viewer",
+  -- Rendered by `love . --export-assets` from scenes/assets/Icon.lua. Unlike
+  -- the rest of the generated art this one ships inside the .love, because
+  -- the dock and the taskbar read it at runtime.
+  icon = "assets/app-icon.png",
   cursors = {
     default = { path = "assets/cursors/default.png", hotX = 8, hotY = 8 },
     active = { path = "assets/cursors/active.png", hotX = 8, hotY = 8 },
@@ -69,12 +73,15 @@ Game({
   assets = {
     outputDir = "assets/generated",
     items = {
-      { name = "icon",    scene = AssetIcon,    width = 1024, height = 1024 },
-      { name = "favicon", scene = AssetFavicon, width = 64,   height = 64 },
-      { name = "cover",   scene = AssetCover,   width = 630,  height = 500 },
-      { name = "social",  scene = AssetSocial,  width = 1200, height = 630 },
-      { name = "wide",    scene = AssetWide,    width = 1920, height = 1080 },
-      { name = "logo",    scene = AssetLogo,    width = 1600, height = 400,  transparent = true },
+      { name = "icon",     scene = AssetIcon,    width = 1024, height = 1024 },
+      -- Unlike the rest this one ships inside the .love, because the `icon`
+      -- field above loads it at runtime for the dock and the taskbar.
+      { name = "app-icon", scene = AssetIcon,    width = 256,  height = 256,  outputDir = "assets" },
+      { name = "favicon",  scene = AssetFavicon, width = 64,   height = 64 },
+      { name = "cover",    scene = AssetCover,   width = 630,  height = 500 },
+      { name = "social",   scene = AssetSocial,  width = 1200, height = 630 },
+      { name = "wide",     scene = AssetWide,    width = 1920, height = 1080 },
+      { name = "logo",     scene = AssetLogo,    width = 1600, height = 400,  transparent = true },
     },
   },
 })

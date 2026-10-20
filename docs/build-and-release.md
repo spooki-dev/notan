@@ -39,11 +39,11 @@ git config core.hooksPath .githooks        # enable the pre-commit hook
 | Tool | Where it comes from | Used for |
 |---|---|---|
 | `love` | `/Applications/love.app/Contents/MacOS/love` (the `LOVE` variable) | `love . --export-assets` |
-| `love.js` | Installed separately | The web build |
-| `butler` | https://itch.io/docs/butler/ (the Homebrew `butler` cask is an unrelated app) | Pushing channels to itch.io; run `butler login` once in a real terminal |
 | `node`, `npm` | Node.js | `scripts/patch-win-icon.mjs`, with dependencies from `scripts/package.json` (`pe-library`, `png-to-ico`, `resedit`) |
-| `iconutil`, `sips`, `plutil`, `codesign` | macOS | `.icns` creation, icon resizing, `Info.plist` edits, ad-hoc signing |
-| `zip`, `unzip`, `curl`, `perl` | macOS | Packaging, fetching runtimes, `{{TITLE}}` substitution |
+| `iconutil`, `sips`, `plutil`, `codesign`, `hdiutil`, `ditto` | macOS | `.icns` creation, icon resizing, `Info.plist` edits, ad-hoc signing, building the `.dmg` |
+| `makensis` | `brew install makensis` | Cross-building the Windows installers from macOS |
+| `zip`, `unzip`, `curl` | macOS | Packaging and fetching runtimes |
+| `gh` | GitHub CLI, logged in | Publishing the release |
 
 ## Configuring the script
 
@@ -75,12 +75,11 @@ The script runs with `set -euo pipefail` from the repo root and uses a temporary
 3. **Check the `.love`.** Unzips it, runs `scripts/lint-lua51.sh` over every `.lua` inside, then `scripts/check-requires.sh` over the unpacked tree.
 4. **Fetch runtimes.** Downloads `love-11.5-macos.zip`, `love-11.5-win32.zip` and `love-11.5-win64.zip` from the LÖVE GitHub releases into `~/.cache/love-release/` if not already cached.
 5. **Build `.icns`.** Resizes `icon.png` with `sips` to 16 through 512 plus `@2x` variants and runs `iconutil -c icns`.
-6. **Package macOS.** Renames `love.app` to `<TITLE>.app`, copies the `.love` into `Contents/Resources/`, writes the `.icns` as `OS X AppIcon.icns` and `GameIcon.icns`, sets `CFBundleIdentifier`, `CFBundleName` and `CFBundleDisplayName`, removes `CFBundleIconName` and `UTExportedTypeDeclarations`, ad-hoc signs with `codesign --force --deep --sign -`, and zips to `<TITLE>-macos.zip`.
-7. **Package Windows.** Runs `npm install` in `scripts/`, resizes `icon.png` to 16 through 256, and for each of `win32` and `win64` patches the icon into `love.exe` with `node scripts/patch-win-icon.mjs`, appends the `.love` to the exe as `<PKG>.exe`, removes `love.exe`, `lovec.exe`, the readmes and the stock `.ico` files, and zips to `<TITLE>-win32.zip` and `<TITLE>-win64.zip`.
-8. **Build web.** Runs `love.js -c -t "$TITLE"` into `releases/<PKG>/web/`, copies `scripts/web/` over the output, deletes `theme/bg.png`, substitutes `{{TITLE}}`, copies `favicon.png` to `theme/favicon.png`, and fails if the favicon link or an unsubstituted `{{` placeholder is found.
-9. **Stage the `.love`.** Copies it into `releases/<PKG>/love/`, because butler unpacks zip uploads and a `.love` is a zip.
-10. **Push** (skipped with `--no-push`). `butler push` for `mac`, `windows`, `windows-32`, `web` and `love` channels, each with `--userversion` set to the short git SHA, then `butler status "$ITCH"`.
-11. **Checklist.** Prints the page images to upload by hand and, after a push, opens `ITCH_EDIT_URL`.
+6. **Package macOS.** Renames `love.app` to `<TITLE>.app`, copies the `.love` into `Contents/Resources/`, writes the `.icns` as `OS X AppIcon.icns` and `GameIcon.icns`, sets `CFBundleIdentifier`, `CFBundleName` and `CFBundleDisplayName`, removes `CFBundleIconName` and `UTExportedTypeDeclarations`, and signs the bundle — ad-hoc with `codesign --force --deep --sign -`, or for Developer ID and notarized when the signing variables are set.
+7. **Build the `.dmg`.** `ditto`s the signed `.app` into a staging folder next to an `/Applications` symlink, runs `hdiutil create -format UDZO` over it to produce `<TITLE>-macos.dmg`, and signs that too.
+8. **Package Windows.** Runs `npm install` in `scripts/`, resizes `icon.png` to 16 through 256, builds a `.ico` with `node scripts/png-to-ico.mjs`, and for each of `win32` and `win64` patches the icon into `love.exe` with `node scripts/patch-win-icon.mjs`, appends the `.love` to the exe as `<PKG>.exe`, removes `love.exe`, `lovec.exe`, the readmes and the stock `.ico` files, then runs `makensis` over `scripts/windows-installer.nsi` to produce `<TITLE>-win32-setup.exe` and `<TITLE>-win64-setup.exe`. The game exe is signed after the `.love` is appended and the installer after it is built, when `WINDOWS_SIGN_HOOK` is set.
+9. **Publish** (skipped with `--no-push`). `gh release create v$VERSION` on `$REPO` with the `.dmg`, both installers and the `.love` attached, then opens the release page.
+10. **Checklist.** Prints where the builds landed and the marketing art you may want for the page.
 
 ### Outputs
 
@@ -89,10 +88,8 @@ Everything lands in `releases/<PKG>/`, which is git-ignored:
 | Path | Contents |
 |---|---|
 | `<TITLE>.love` | The game archive |
-| `<TITLE>-macos.zip` | `<TITLE>.app` for macOS |
-| `<TITLE>-win32.zip`, `<TITLE>-win64.zip` | `<TITLE>-win32/` and `<TITLE>-win64/` folders with `<PKG>.exe` and the LÖVE DLLs |
-| `web/` | love.js output plus the template page |
-| `love/<TITLE>.love` | Folder copy pushed to the `love` channel |
+| `<TITLE>-macos.dmg` | A disk image holding `<TITLE>.app` beside an `/Applications` symlink |
+| `<TITLE>-win32-setup.exe`, `<TITLE>-win64-setup.exe` | NSIS installers carrying `<PKG>.exe` and the LÖVE DLLs |
 
 ### What ships and what does not
 
@@ -119,7 +116,26 @@ scripts/check-requires.sh some/dir    # ...or against an unpacked .love
 - The Mac icon is an `.icns` built with `iconutil`. With `CFBundleIconName` present macOS reads the icon from `Assets.car`, so the script removes that key.
 - Signing is ad-hoc by default; a failure prints a warning and continues. Set `MACOS_SIGN_IDENTITY`, `MACOS_NOTARY_PROFILE` and `WINDOWS_SIGN_HOOK` to sign for real — see `code-signing.md`.
 
+## The downloads
+
+A `.zip` is a bad first impression. On macOS it leaves a loose `.app` in `~/Downloads`, which is exactly where Gatekeeper is least forgiving, and on Windows it leaves a folder of DLLs that only runs if the person keeps the exe inside it. Both platforms get something that installs instead.
+
+### macOS: the `.dmg`
+
+`hdiutil create -format UDZO` over a staging folder holding the signed `<TITLE>.app` and a symlink to `/Applications`, which is what makes the drag obvious when the image mounts. The app is copied in with `ditto`, not `cp`, because `cp` does not carry the code signature across and the result fails to launch.
+
+### Windows: the installer
+
+`scripts/windows-installer.nsi`, built with `makensis` — NSIS cross-compiles from macOS, so no Windows machine is involved. Per architecture it takes `TITLE`, `PKG`, `VERSION`, `ARCH`, `SRCDIR` (the folder holding `<PKG>.exe` and the DLLs), `ICON` and `OUTFILE` as `-D` defines.
+
+The install is **per-user**, into `%LOCALAPPDATA%\Programs\<TITLE>`, with `RequestExecutionLevel user`. That is deliberate: a per-machine install needs admin rights, and a UAC elevation prompt naming an unknown publisher is where people stop. It writes a Start-menu and desktop shortcut, an `uninstall.exe`, and the `HKCU` uninstall key that puts the game in Settings → Apps. Revisit the choice once the exe is signed; see `code-signing.md`.
+
+The uninstaller only recurses into `$INSTDIR` when `uninstall.exe` is sitting in it, so a person who installed into a directory of their own does not lose it.
+
 ## The web page
+
+> The sections below describe the love.js and itch.io pipeline. `scripts/release.sh` publishes a GitHub release now and does neither; they are kept as the reference for bringing the web build back.
+
 
 love.js generates a page with a heading, footer and "Powered by" text. The script replaces it with the template in `scripts/web/`:
 

@@ -7,13 +7,13 @@
 #   VERSION=0.2.0 scripts/release.sh
 #
 # Steps: regenerate marketing art (love . --export-assets) -> .love zipped from
-# scripts/love-filelist.sh -> Mac .app and Windows .exe packaged from the
-# official LÖVE runtime with the generated icon baked in -> gh release create
-# with all four downloads attached. spookidev.com/notan links at /releases/latest/download/,
-# so the page needs no change when a release goes out.
+# scripts/love-filelist.sh -> a macOS .dmg and a Windows installer .exe built
+# from the official LÖVE runtime with the generated icon baked in -> gh release
+# create with every download attached. spookidev.com/notan links at
+# /releases/latest/download/, so the page needs no change when a release goes
+# out.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-ROOT="$PWD"
 
 TITLE="Notan"
 PKG=notan
@@ -44,6 +44,13 @@ MACOS_SIGN_IDENTITY="${MACOS_SIGN_IDENTITY:-}"
 MACOS_NOTARY_PROFILE="${MACOS_NOTARY_PROFILE:-}"
 WINDOWS_SIGN_HOOK="${WINDOWS_SIGN_HOOK:-}"
 ENTITLEMENTS=scripts/macos-entitlements.plist
+# Checked here rather than at the notarization step, which is a minute into the
+# build: Apple will not notarize an ad-hoc build, so the pairing is wrong from
+# the start.
+[[ -z "$MACOS_NOTARY_PROFILE" || -n "$MACOS_SIGN_IDENTITY" ]] \
+  || { echo "MACOS_NOTARY_PROFILE needs MACOS_SIGN_IDENTITY: Apple only notarizes Developer ID builds" >&2; exit 1; }
+[[ -z "$WINDOWS_SIGN_HOOK" || -x "$WINDOWS_SIGN_HOOK" ]] \
+  || { echo "WINDOWS_SIGN_HOOK is not executable: $WINDOWS_SIGN_HOOK" >&2; exit 1; }
 
 # Signs an .app for Developer ID, or ad-hoc when no identity is configured.
 # Nested Mach-O code is signed first: `--deep` is deprecated, and it does not
@@ -70,19 +77,40 @@ sign_macos_app() {
   codesign --verify --strict --verbose=2 "$app"
 }
 
+# The .dmg gets a signature of its own, so the download is identified before
+# anything is mounted. No entitlements and no hardened runtime: it is not code.
+sign_macos_dmg() {
+  local dmg=$1
+  if [[ -z "$MACOS_SIGN_IDENTITY" ]]; then
+    codesign --force --sign - "$dmg" 2>/dev/null \
+      || echo "warning: ad-hoc codesign of the dmg failed" >&2
+    return 0
+  fi
+  codesign --force --timestamp --sign "$MACOS_SIGN_IDENTITY" "$dmg"
+}
+
 # Submits to Apple and staples the ticket, so a first launch works offline.
-# Notarization takes an archive, but the ticket staples to the bundle, not to
-# a zip, so the archive is rebuilt around the stapled app afterwards.
+# Notarization takes an archive, but the ticket staples to the thing inside it,
+# which is why the caller says what to submit and what to staple separately.
 notarize_macos() {
-  local app=$1 archive=$2
+  local target=$1 archive=$2
   [[ -n "$MACOS_NOTARY_PROFILE" ]] || return 0
-  [[ -n "$MACOS_SIGN_IDENTITY" ]] || { echo "MACOS_NOTARY_PROFILE needs MACOS_SIGN_IDENTITY: Apple only notarizes Developer ID builds" >&2; exit 1; }
-  step "Notarize $(basename "$archive")"
+  step "Notarize $(basename "$target")"
   xcrun notarytool submit "$archive" --keychain-profile "$MACOS_NOTARY_PROFILE" --wait
-  xcrun stapler staple "$app"
+  xcrun stapler staple "$target"
+  xcrun stapler validate "$target"
+}
+
+# The .app goes up inside a throwaway zip, because notarytool will not take a
+# bundle. Stapling it here is what makes the copy inside the .dmg built
+# afterwards already carry its ticket.
+notarize_macos_app() {
+  local app=$1
+  [[ -n "$MACOS_NOTARY_PROFILE" ]] || return 0
+  local archive="$WORK/notarize-app.zip"
   rm -f "$archive"
-  (cd "$(dirname "$app")" && zip -qry "$ROOT/$archive" "$(basename "$app")")
-  xcrun stapler validate "$app"
+  (cd "$(dirname "$app")" && zip -qry "$archive" "$(basename "$app")")
+  notarize_macos "$app" "$archive"
 }
 
 # Authenticode, through whatever tooling the certificate needs. Every CA and
@@ -91,11 +119,10 @@ notarize_macos() {
 sign_windows() {
   local target=$1
   [[ -n "$WINDOWS_SIGN_HOOK" ]] || return 0
-  [[ -x "$WINDOWS_SIGN_HOOK" ]] || { echo "WINDOWS_SIGN_HOOK is not executable: $WINDOWS_SIGN_HOOK" >&2; exit 1; }
   "$WINDOWS_SIGN_HOOK" "$target"
 }
 
-for tool in "$LOVE" iconutil sips plutil codesign zip unzip curl node npm gh; do
+for tool in "$LOVE" iconutil sips plutil codesign hdiutil makensis zip unzip curl node npm gh; do
   command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }
 done
 
@@ -165,15 +192,30 @@ plutil -replace CFBundleDisplayName -string "$TITLE" "$PLIST" 2>/dev/null || tru
 plutil -remove CFBundleIconName "$PLIST" 2>/dev/null || true
 plutil -remove UTExportedTypeDeclarations "$PLIST" 2>/dev/null || true
 sign_macos_app "$APP"
-(cd "$WORK/mac" && zip -qry "$ROOT/$OUT/$TITLE-macos.zip" "$TITLE.app")
-notarize_macos "$APP" "$OUT/$TITLE-macos.zip"
+notarize_macos_app "$APP"
 
-step "Package Windows exes"
+step "Build the .dmg"
+# A disk image rather than a zip: it mounts on double-click and the
+# /Applications symlink makes installing the obvious drag, instead of leaving
+# an .app loose in ~/Downloads where macOS quarantines it hardest.
+DMG="$OUT/$TITLE-macos.dmg"
+STAGE="$WORK/dmg"
+mkdir -p "$STAGE"
+ditto "$APP" "$STAGE/$TITLE.app"   # ditto, not cp: keeps the signature intact
+ln -s /Applications "$STAGE/Applications"
+hdiutil create -quiet -volname "$TITLE" -srcfolder "$STAGE" -ov -format UDZO -fs HFS+ "$DMG"
+sign_macos_dmg "$DMG"
+# The app inside was stapled before it was copied in, so this second trip is
+# only about the disk image itself; notarytool takes a .dmg as it is.
+notarize_macos "$DMG" "$DMG"
+
+step "Package Windows installers"
 (cd scripts && npm install --silent --no-audit --no-fund)
 mkdir "$WORK/ico"
 for size in 16 24 32 48 64 128 256; do
   sips -z "$size" "$size" "$GEN/icon.png" --out "$WORK/ico/$size.png" >/dev/null
 done
+node scripts/png-to-ico.mjs "$WORK/$PKG.ico" "$WORK"/ico/*.png >/dev/null
 for arch in 32 64; do
   DIR="$WORK/win$arch"
   unzip -q "$RUNTIME_CACHE/love-$LOVE_RUNTIME_VERSION-win$arch.zip" -d "$DIR"
@@ -187,14 +229,25 @@ for arch in 32 64; do
   # Sign after the .love is appended: anything added to the file afterwards
   # falls outside the signature and invalidates it.
   sign_windows "$SRC/$PKG.exe"
-  mv "$SRC" "$DIR/$TITLE-win$arch"
-  (cd "$DIR" && zip -qr "$OLDPWD/$OUT/$TITLE-win$arch.zip" "$TITLE-win$arch")
+  # An installer rather than a folder in a zip: the game needs its DLLs
+  # beside it, and a zip asks a beginner to understand that before it will
+  # run. NSIS cross-builds from macOS; see scripts/windows-installer.nsi for
+  # why the install is per-user.
+  SETUP="$PWD/$OUT/$TITLE-win$arch-setup.exe"
+  makensis -V2 \
+    "-DTITLE=$TITLE" "-DPKG=$PKG" "-DVERSION=$VERSION" "-DARCH=$arch" \
+    "-DSRCDIR=$SRC" "-DICON=$WORK/$PKG.ico" \
+    "-DOUTFILE=$SETUP" \
+    scripts/windows-installer.nsi
+  # The installer is the thing SmartScreen actually judges, so it is signed
+  # too; the exe inside it is signed separately above for after it is unpacked.
+  sign_windows "$SETUP"
 done
 
-if [[ -n "$MACOS_SIGN_IDENTITY" ]]; then
+if [[ -n "$MACOS_SIGN_IDENTITY" && -n "$WINDOWS_SIGN_HOOK" ]]; then
   RELEASE_NOTES="Built from $SHA."
 else
-  RELEASE_NOTES="Built from $SHA. The macOS app and Windows exes are unsigned: see the install notes at https://spookidev.com/notan#install."
+  RELEASE_NOTES="Built from $SHA. The macOS app and the Windows installers are unsigned: see the install notes at https://spookidev.com/notan#install."
 fi
 
 if [[ $PUSH -eq 1 ]]; then
@@ -203,9 +256,9 @@ if [[ $PUSH -eq 1 ]]; then
     --repo "$REPO" \
     --title "$TITLE $VERSION" \
     --notes "$RELEASE_NOTES" \
-    "$OUT/$TITLE-macos.zip#$TITLE for macOS" \
-    "$OUT/$TITLE-win64.zip#$TITLE for Windows (64-bit)" \
-    "$OUT/$TITLE-win32.zip#$TITLE for Windows (32-bit)" \
+    "$DMG#$TITLE for macOS (.dmg)" \
+    "$OUT/$TITLE-win64-setup.exe#$TITLE for Windows, 64-bit (installer)" \
+    "$OUT/$TITLE-win32-setup.exe#$TITLE for Windows, 32-bit (installer)" \
     "$LOVEFILE#$TITLE.love (any OS with LÖVE $LOVE_RUNTIME_VERSION)"
   gh release view "v$VERSION" --repo "$REPO" --web
 else
