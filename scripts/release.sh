@@ -7,10 +7,11 @@
 #   VERSION=0.2.0 scripts/release.sh
 #
 # Steps: regenerate marketing art (love . --export-assets) -> .love zipped from
-# scripts/love-filelist.sh -> Mac .app and Windows .exe packaged from the
-# official LÖVE runtime with the generated icon baked in -> gh release create
-# with all four downloads attached. spookidev.com/notan links at /releases/latest/download/,
-# so the page needs no change when a release goes out.
+# scripts/love-filelist.sh -> a macOS .dmg and a Windows installer .exe built
+# from the official LÖVE runtime with the generated icon baked in -> gh release
+# create with every download attached. spookidev.com/notan links at
+# /releases/latest/download/, so the page needs no change when a release goes
+# out.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -32,7 +33,7 @@ SHA=$(git rev-parse --short HEAD)
 PUSH=1
 [[ "${1:-}" == "--no-push" ]] && PUSH=0
 
-for tool in "$LOVE" iconutil sips plutil codesign zip unzip curl node npm gh; do
+for tool in "$LOVE" iconutil sips plutil codesign hdiutil makensis zip unzip curl node npm gh; do
   command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }
 done
 
@@ -102,14 +103,26 @@ plutil -replace CFBundleDisplayName -string "$TITLE" "$PLIST" 2>/dev/null || tru
 plutil -remove CFBundleIconName "$PLIST" 2>/dev/null || true
 plutil -remove UTExportedTypeDeclarations "$PLIST" 2>/dev/null || true
 codesign --force --deep --sign - "$APP" 2>/dev/null || echo "warning: ad-hoc codesign failed" >&2
-(cd "$WORK/mac" && zip -qry "$OLDPWD/$OUT/$TITLE-macos.zip" "$TITLE.app")
 
-step "Package Windows exes"
+step "Build the .dmg"
+# A disk image rather than a zip: it mounts on double-click and the
+# /Applications symlink makes installing the obvious drag, instead of leaving
+# an .app loose in ~/Downloads where macOS quarantines it hardest.
+DMG="$OUT/$TITLE-macos.dmg"
+STAGE="$WORK/dmg"
+mkdir -p "$STAGE"
+ditto "$APP" "$STAGE/$TITLE.app"   # ditto, not cp: keeps the signature intact
+ln -s /Applications "$STAGE/Applications"
+hdiutil create -quiet -volname "$TITLE" -srcfolder "$STAGE" -ov -format UDZO -fs HFS+ "$DMG"
+codesign --force --sign - "$DMG" 2>/dev/null || echo "warning: ad-hoc codesign of the dmg failed" >&2
+
+step "Package Windows installers"
 (cd scripts && npm install --silent --no-audit --no-fund)
 mkdir "$WORK/ico"
 for size in 16 24 32 48 64 128 256; do
   sips -z "$size" "$size" "$GEN/icon.png" --out "$WORK/ico/$size.png" >/dev/null
 done
+node scripts/png-to-ico.mjs "$WORK/$PKG.ico" "$WORK"/ico/*.png >/dev/null
 for arch in 32 64; do
   DIR="$WORK/win$arch"
   unzip -q "$RUNTIME_CACHE/love-$LOVE_RUNTIME_VERSION-win$arch.zip" -d "$DIR"
@@ -120,8 +133,15 @@ for arch in 32 64; do
   # directory record, which is how LÖVE finds a fused game.
   cat "$DIR/love-icon.exe" "$LOVEFILE" > "$SRC/$PKG.exe"
   rm -f "$SRC/love.exe" "$SRC/lovec.exe" "$SRC/readme.txt" "$SRC/changes.txt" "$SRC/love.ico" "$SRC/game.ico"
-  mv "$SRC" "$DIR/$TITLE-win$arch"
-  (cd "$DIR" && zip -qr "$OLDPWD/$OUT/$TITLE-win$arch.zip" "$TITLE-win$arch")
+  # An installer rather than a folder in a zip: the game needs its DLLs
+  # beside it, and a zip asks a beginner to understand that before it will
+  # run. NSIS cross-builds from macOS; see scripts/windows-installer.nsi for
+  # why the install is per-user.
+  makensis -V2 \
+    "-DTITLE=$TITLE" "-DPKG=$PKG" "-DVERSION=$VERSION" "-DARCH=$arch" \
+    "-DSRCDIR=$SRC" "-DICON=$WORK/$PKG.ico" \
+    "-DOUTFILE=$PWD/$OUT/$TITLE-win$arch-setup.exe" \
+    scripts/windows-installer.nsi
 done
 
 if [[ $PUSH -eq 1 ]]; then
@@ -129,10 +149,10 @@ if [[ $PUSH -eq 1 ]]; then
   gh release create "v$VERSION" \
     --repo "$REPO" \
     --title "$TITLE $VERSION" \
-    --notes "Built from $SHA. The macOS app and Windows exes are unsigned: see the install notes at https://spookidev.com/notan#install." \
-    "$OUT/$TITLE-macos.zip#$TITLE for macOS" \
-    "$OUT/$TITLE-win64.zip#$TITLE for Windows (64-bit)" \
-    "$OUT/$TITLE-win32.zip#$TITLE for Windows (32-bit)" \
+    --notes "Built from $SHA. The macOS app and the Windows installers are unsigned: see the install notes at https://spookidev.com/notan#install." \
+    "$DMG#$TITLE for macOS (.dmg)" \
+    "$OUT/$TITLE-win64-setup.exe#$TITLE for Windows, 64-bit (installer)" \
+    "$OUT/$TITLE-win32-setup.exe#$TITLE for Windows, 32-bit (installer)" \
     "$LOVEFILE#$TITLE.love (any OS with LÖVE $LOVE_RUNTIME_VERSION)"
   gh release view "v$VERSION" --repo "$REPO" --web
 else
